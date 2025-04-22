@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var isImagePickerPresented = false
     @State private var analysisResults: String = ""
     @State private var isAnalyzing: Bool = false
+    @State private var identifiedItems: [String] = []
     
     var body: some View {
         VStack(spacing: 20) {
@@ -69,6 +70,31 @@ struct ContentView: View {
                 }
                 .frame(maxHeight: 200)
             }
+            
+            if !identifiedItems.isEmpty {
+                Text("Identified Items:")
+                    .font(.headline)
+                    .padding(.top)
+                
+                List {
+                    ForEach(identifiedItems, id: \.self) { item in
+                        HStack {
+                            Text(item)
+                            Spacer()
+                            Button(action: {
+                                // Reserved for future eBay search functionality
+                                print("Will search eBay for: \(item)")
+                            }) {
+                                Text("Check Price")
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(identifiedItems.count * 50), 200))
+                .background(Color(.systemGray6))
+                .cornerRadius(10)
+            }
         }
         .padding()
         .sheet(isPresented: $isImagePickerPresented) {
@@ -80,7 +106,8 @@ struct ContentView: View {
         guard let image = selectedImage else { return }
         
         isAnalyzing = true
-        analysisResults = "Analyzing image..."
+        analysisResults = "Analyzing image with ChatGPT..."
+        identifiedItems = []
         
         // Convert UIImage to base64 string
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
@@ -91,22 +118,38 @@ struct ContentView: View {
         
         let base64Image = imageData.base64EncodedString()
         
-        // Prepare the Vision API request
-        let apiKey = "YOUR_GOOGLE_API_KEY"
-        let url = URL(string: "https://vision.googleapis.com/v1/images:annotate?key=\(apiKey)")!
+        // Prepare the ChatGPT API request
+        let apiKey = "YOUR_OPENAI_API_KEY"
+        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
         
-        // Break down the complex dictionary into smaller parts
-        let imageContent: [String: Any] = ["content": base64Image]
+        // Create the request body
+        let messages: [[String: Any]] = [
+            [
+                "role": "system",
+                "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. Identify all products in the image, listing the specific product names that could be searched on eBay. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of identified items."
+            ],
+            [
+                "role": "user",
+                "content": [
+                    [
+                        "type": "text",
+                        "text": "Identify all products in this image. List them specifically by name as they would appear in an eBay search."
+                    ],
+                    [
+                        "type": "image_url",
+                        "image_url": [
+                            "url": "data:image/jpeg;base64,\(base64Image)"
+                        ]
+                    ]
+                ]
+            ]
+        ]
         
-        let labelDetection: [String: Any] = ["type": "LABEL_DETECTION", "maxResults": 10]
-        let textDetection: [String: Any] = ["type": "TEXT_DETECTION", "maxResults": 5]
-        let objectLocalization: [String: Any] = ["type": "OBJECT_LOCALIZATION", "maxResults": 5]
-        
-        let features: [[String: Any]] = [labelDetection, textDetection, objectLocalization]
-        
-        let request: [String: Any] = ["image": imageContent, "features": features]
-        
-        let requestBody: [String: Any] = ["requests": [request]]
+        let requestBody: [String: Any] = [
+            "model": "gpt-4o",
+            "messages": messages,
+            "max_tokens": 1000
+        ]
         
         guard let jsonData = try? JSONSerialization.data(withJSONObject: requestBody) else {
             analysisResults = "Error: Could not serialize request"
@@ -117,6 +160,7 @@ struct ContentView: View {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.httpBody = jsonData
         
         let task = URLSession.shared.dataTask(with: urlRequest) { data, response, error in
@@ -125,6 +169,7 @@ struct ContentView: View {
                 
                 if let error = error {
                     analysisResults = "Error: \(error.localizedDescription)"
+                    print("Network error: \(error.localizedDescription)")
                     return
                 }
                 
@@ -135,18 +180,9 @@ struct ContentView: View {
                     if httpResponse.statusCode != 200 {
                         if let data = data, let errorMessage = String(data: data, encoding: .utf8) {
                             print("API Error Response: \(errorMessage)")
-                            
-                            if httpResponse.statusCode == 403 {
-                                analysisResults = "API Error (403 Forbidden): Vision API access denied.\n\nTroubleshooting:\n• Verify API key is correct\n• Enable Vision API in Google Cloud Console\n• Enable billing for your Google Cloud project\n• Check API key restrictions"
-                            } else {
-                                analysisResults = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
-                            }
+                            analysisResults = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
                         } else {
-                            if httpResponse.statusCode == 403 {
-                                analysisResults = "API Error (403 Forbidden): Vision API access denied.\n\nTroubleshooting:\n• Verify API key is correct\n• Enable Vision API in Google Cloud Console\n• Enable billing for your Google Cloud project\n• Check API key restrictions"
-                            } else {
-                                analysisResults = "API Error: Status code \(httpResponse.statusCode)"
-                            }
+                            analysisResults = "API Error: Status code \(httpResponse.statusCode)"
                         }
                         return
                     }
@@ -168,63 +204,24 @@ struct ContentView: View {
                         return
                     }
                     
-                    // Handle case where responses array might be empty
-                    guard let responses = json["responses"] as? [[String: Any]], !responses.isEmpty else {
-                        analysisResults = "Error: Empty response from API"
-                        return
-                    }
-                    
-                    guard let firstResponse = responses.first else {
+                    // Extract the response content
+                    guard let choices = json["choices"] as? [[String: Any]],
+                          let firstChoice = choices.first,
+                          let message = firstChoice["message"] as? [String: Any],
+                          let content = message["content"] as? String else {
                         analysisResults = "Error: Invalid response format"
                         return
                     }
                     
-                    // Check if there's an error in the response
-                    if let error = firstResponse["error"] as? [String: Any],
-                       let message = error["message"] as? String {
-                        analysisResults = "API Error: \(message)"
-                        return
-                    }
+                    // Set the full response as analysis results
+                    analysisResults = content
                     
-                    var results = ""
-                    
-                    // Process label annotations
-                    if let labelAnnotations = firstResponse["labelAnnotations"] as? [[String: Any]] {
-                        results += "Labels:\n"
-                        for label in labelAnnotations {
-                            if let description = label["description"] as? String,
-                               let score = label["score"] as? Double {
-                                let percentage = Int(score * 100)
-                                results += "• \(description): \(percentage)%\n"
-                            }
-                        }
-                        results += "\n"
-                    }
-                    
-                    // Process text annotations
-                    if let textAnnotations = firstResponse["textAnnotations"] as? [[String: Any]],
-                       !textAnnotations.isEmpty,
-                       let textDescription = textAnnotations[0]["description"] as? String {
-                        results += "Text detected:\n\(textDescription)\n\n"
-                    }
-                    
-                    // Process object annotations
-                    if let objectAnnotations = firstResponse["localizedObjectAnnotations"] as? [[String: Any]] {
-                        results += "Objects:\n"
-                        for object in objectAnnotations {
-                            if let name = object["name"] as? String,
-                               let score = object["score"] as? Double {
-                                let percentage = Int(score * 100)
-                                results += "• \(name): \(percentage)%\n"
-                            }
-                        }
-                    }
-                    
-                    analysisResults = results.isEmpty ? "No features detected in the image" : results
+                    // Process the response to extract individual items
+                    extractItemsFromResponse(content)
                     
                     // Print analysis results to console for debugging
                     print("===== ANALYSIS RESULTS =====")
-                    print(analysisResults)
+                    print(content)
                     print("===========================")
                 } catch {
                     analysisResults = "Error parsing response: \(error.localizedDescription)"
@@ -234,6 +231,53 @@ struct ContentView: View {
         }
         
         task.resume()
+    }
+    
+    // Helper function to extract individual items from ChatGPT's response
+    func extractItemsFromResponse(_ response: String) {
+        // Split by new lines
+        let lines = response.components(separatedBy: .newlines)
+        
+        // Look for numbered or bulleted list items
+        var items: [String] = []
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Match numbered items (1. Item) or bulleted items (• Item, - Item, * Item)
+            if let match = trimmedLine.range(of: #"^(\d+\.|\•|\-|\*)\s+"#, options: .regularExpression) {
+                // Get the text after the prefix
+                let itemStart = trimmedLine.index(match.upperBound, offsetBy: 0)
+                let itemText = String(trimmedLine[itemStart...])
+                
+                if !itemText.isEmpty {
+                    items.append(itemText)
+                }
+            }
+        }
+        
+        // If we couldn't find list items, try to extract product mentions
+        if items.isEmpty {
+            // Use a simplified approach if no list format was found
+            items = extractProductMentions(response)
+        }
+        
+        DispatchQueue.main.async {
+            self.identifiedItems = items
+        }
+    }
+    
+    // Fallback function to extract product mentions if no list format is found
+    func extractProductMentions(_ text: String) -> [String] {
+        // Split by common separators
+        let separators = CharacterSet(charactersIn: ",;\n")
+        let components = text.components(separatedBy: separators)
+        
+        // Filter out very short components and trim whitespace
+        return components
+            .map { $0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) }
+            .filter { $0.count > 5 } // Only include items with some substance
+            .prefix(10) // Limit to 10 items
+            .map { String($0) }
     }
 }
 
