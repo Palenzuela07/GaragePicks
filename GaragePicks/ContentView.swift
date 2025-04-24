@@ -14,8 +14,68 @@ struct ContentView: View {
     @State private var analysisResults: String = ""
     @State private var isAnalyzing: Bool = false
     @State private var identifiedItems: [String] = []
+    @State private var selectedItemForPricing: String? = nil
+    @State private var priceResults: EbaySearchResult? = nil
+    @State private var isPriceLoading: Bool = false
+    @State private var priceError: String? = nil
+    @State private var searchQuery: String? = nil
+    @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
+    @State private var useMockData: Bool = false // Track mock data preference
+    
+    private let ebayService = EbayApiService()
     
     var body: some View {
+        VStack {
+            // Tab buttons at top
+            HStack {
+                TabButton(title: "Image", isActive: activeTab == 0) {
+                    activeTab = 0
+                }
+                
+                TabButton(title: "Analysis", isActive: activeTab == 1) {
+                    activeTab = 1
+                }
+                
+                TabButton(title: "Pricing", isActive: activeTab == 2) {
+                    activeTab = 2
+                }
+            }
+            .padding(.horizontal)
+            
+            // Main content area
+            ScrollView {
+                if activeTab == 0 {
+                    imageTabContent
+                } else if activeTab == 1 {
+                    analysisTabContent
+                } else {
+                    pricingTabContent
+                }
+            }
+        }
+        .sheet(isPresented: $isImagePickerPresented) {
+            ImagePicker(selectedImage: $selectedImage)
+        }
+        .onChange(of: identifiedItems) { _ in
+            // When items are identified, switch to the analysis tab
+            if !identifiedItems.isEmpty {
+                activeTab = 1
+            }
+        }
+        .onChange(of: isPriceLoading) { isLoading in
+            // When pricing results are loaded, switch to pricing tab
+            if !isLoading && priceResults != nil {
+                activeTab = 2
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // Handle app returning to foreground if needed
+        }
+    }
+    
+    // MARK: - Tab Content Views
+    
+    var imageTabContent: some View {
         VStack(spacing: 20) {
             if let image = selectedImage {
                 Image(uiImage: image)
@@ -56,51 +116,214 @@ struct ContentView: View {
                 .disabled(selectedImage == nil || isAnalyzing)
             }
             .padding(.horizontal)
+        }
+        .padding()
+    }
+    
+    var analysisTabContent: some View {
+        VStack(spacing: 16) {
+            // Add mock data toggle
+            Toggle("Use Mock Data", isOn: $useMockData)
+                .padding(.horizontal)
+                .onChange(of: useMockData) { newValue in
+                    ebayService.setUseMockData(newValue)
+                }
             
             if !analysisResults.isEmpty {
-                Text("Analysis Results:")
-                    .font(.headline)
-                    .padding(.top)
-                
-                ScrollView {
+                VStack(alignment: .leading) {
+                    Text("Analysis Results:")
+                        .font(.headline)
+                    
                     Text(analysisResults)
                         .padding()
                         .background(Color(.systemGray6))
                         .cornerRadius(10)
                 }
-                .frame(maxHeight: 200)
+                .padding(.horizontal)
             }
             
             if !identifiedItems.isEmpty {
-                Text("Identified Items:")
-                    .font(.headline)
-                    .padding(.top)
-                
-                List {
+                VStack(alignment: .leading) {
+                    Text("Identified Items:")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
                     ForEach(identifiedItems, id: \.self) { item in
                         HStack {
                             Text(item)
+                                .lineLimit(2)
                             Spacer()
                             Button(action: {
-                                // Reserved for future eBay search functionality
-                                print("Will search eBay for: \(item)")
+                                searchEbayForItem(item)
                             }) {
-                                Text("Check Price")
-                                    .foregroundColor(.blue)
+                                Text(selectedItemForPricing == item && isPriceLoading ? "Loading..." : "Check Price")
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.blue)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(8)
                             }
+                            .disabled(isPriceLoading)
                         }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(8)
+                        .padding(.horizontal)
                     }
                 }
-                .frame(height: min(CGFloat(identifiedItems.count * 50), 200))
-                .background(Color(.systemGray6))
-                .cornerRadius(10)
+            }
+            
+            if isAnalyzing {
+                ProgressView("Analyzing image...")
+                    .padding()
             }
         }
-        .padding()
-        .sheet(isPresented: $isImagePickerPresented) {
-            ImagePicker(selectedImage: $selectedImage)
+        .padding(.vertical)
+    }
+    
+    var pricingTabContent: some View {
+        VStack(spacing: 16) {
+            if let priceResults = priceResults, let selectedItem = selectedItemForPricing {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Price Results for: \(selectedItem)")
+                        .font(.headline)
+                    
+                    if let query = searchQuery {
+                        Text("Search terms: \(query)")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                    
+                    if ebayService.isUsingMockData {
+                        Text("⚠️ USING SIMULATED DATA (due to eBay API rate limits)")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 8)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(4)
+                    }
+                    
+                    Group {
+                        Text("Average Price: $\(String(format: "%.2f", priceResults.averagePrice))")
+                        
+                        Text("Based on \(priceResults.itemCount) sold listings")
+                    }
+                    .font(.subheadline)
+                    
+                    if !priceResults.items.isEmpty {
+                        Text("Recent Sales:")
+                            .font(.headline)
+                            .padding(.top, 4)
+                        
+                        ForEach(priceResults.items.prefix(5), id: \.title) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("$\(String(format: "%.2f", item.price))")
+                                        .font(.headline)
+                                    Spacer()
+                                    Text(item.condition)
+                                        .font(.caption)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 2)
+                                        .background(Color(.systemGray5))
+                                        .cornerRadius(4)
+                                }
+                                
+                                Text(item.title)
+                                    .font(.caption)
+                                    .lineLimit(2)
+                            }
+                            .padding()
+                            .background(Color(.systemGray6))
+                            .cornerRadius(10)
+                            .padding(.vertical, 4)
+                        }
+                    } else {
+                        Text("No individual listings available to display")
+                            .foregroundColor(.gray)
+                            .padding()
+                    }
+                }
+                .padding()
+                .background(Color(.systemBackground))
+                .cornerRadius(10)
+                .padding(.horizontal)
+                
+                Button(action: {
+                    activeTab = 1 // Go back to analysis tab
+                }) {
+                    Text("← Back to Analysis")
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 16)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                }
+                .padding()
+            } else if isPriceLoading {
+                VStack(spacing: 16) {
+                    ProgressView("Loading price data...")
+                        .padding()
+                    if let item = selectedItemForPricing {
+                        Text("Searching for: \(item)")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                }
+            } else if let error = priceError {
+                VStack {
+                    Text("Error:")
+                        .font(.headline)
+                        .foregroundColor(.red)
+                    
+                    Text(error)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(10)
+                        .padding(.horizontal)
+                    
+                    Button(action: {
+                        activeTab = 1 // Go back to analysis tab
+                    }) {
+                        Text("← Back to Analysis")
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                    }
+                    .padding()
+                }
+            } else {
+                VStack {
+                    Text("Select an item to check pricing")
+                        .foregroundColor(.gray)
+                        .padding()
+                    
+                    Button(action: {
+                        activeTab = 1
+                    }) {
+                        Text("← Go to Item Selection")
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                    }
+                }
+            }
+        }
+        .padding(.vertical)
+        .onAppear {
+            print("Pricing tab appeared. isPriceLoading: \(isPriceLoading), has results: \(priceResults != nil), has error: \(priceError != nil)")
         }
     }
+    
+    // MARK: - Helper Methods
     
     func analyzePhoto() {
         guard let image = selectedImage else { return }
@@ -279,6 +502,68 @@ struct ContentView: View {
             .prefix(10) // Limit to 10 items
             .map { String($0) }
     }
+    
+    func searchEbayForItem(_ item: String) {
+        // Clean up the search query first
+        let cleanQuery = item
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: " - ", with: " ")
+        
+        selectedItemForPricing = item
+        isPriceLoading = true
+        priceError = nil
+        priceResults = nil
+        searchQuery = cleanQuery
+        
+        // Force switch to the pricing tab to show loading state
+        activeTab = 2
+        
+        Task {
+            do {
+                let result = await ebayService.searchCompletedItems(keyword: cleanQuery)
+                
+                DispatchQueue.main.async {
+                    isPriceLoading = false
+                    
+                    switch result {
+                    case .success(let searchResult):
+                        self.priceResults = searchResult
+                        print("Found \(searchResult.itemCount) items with average price: $\(searchResult.averagePrice)")
+                        // Ensure the pricing tab is active
+                        activeTab = 2
+                        
+                    case .failure(let error):
+                        if let ebayError = error as? EbayError {
+                            switch ebayError {
+                            case .noItemsFound:
+                                self.priceError = "No items found on eBay matching this search. Try a more general search term."
+                            case .networkError(let message):
+                                self.priceError = "Network error: \(message)"
+                            case .parsingError(let message):
+                                self.priceError = "Error parsing data: \(message)"
+                            case .authenticationError(let message):
+                                self.priceError = "Authentication error: \(message)"
+                            }
+                        } else {
+                            self.priceError = error.localizedDescription
+                        }
+                        print("eBay search error: \(error.localizedDescription)")
+                        // Ensure error is shown on pricing tab
+                        activeTab = 2
+                        GaragePicksApp.errorManager.logError(error.localizedDescription)
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    isPriceLoading = false
+                    priceError = error.localizedDescription
+                    print("Unexpected error during eBay search: \(error.localizedDescription)")
+                    activeTab = 2
+                }
+            }
+        }
+    }
 }
 
 struct ImagePicker: UIViewControllerRepresentable {
@@ -318,6 +603,26 @@ struct ImagePicker: UIViewControllerRepresentable {
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: - Tab Button Component
+struct TabButton: View {
+    let title: String
+    let isActive: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .fontWeight(isActive ? .bold : .regular)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity)
+                .background(isActive ? Color.blue : Color(.systemGray5))
+                .foregroundColor(isActive ? .white : .primary)
+                .cornerRadius(8)
         }
     }
 }
