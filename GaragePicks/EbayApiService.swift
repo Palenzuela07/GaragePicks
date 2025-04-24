@@ -17,6 +17,8 @@ struct EbayItem: Equatable {
 
 struct EbaySearchResult: Equatable {
     let averagePrice: Double
+    let lowestPrice: Double
+    let highestPrice: Double
     let itemCount: Int
     let items: [EbayItem]
 }
@@ -43,9 +45,6 @@ struct OAuthToken: Codable {
 
 // Basic eBay API Service
 class EbayApiService {
-    // For development/testing
-    private var useMockData = false // Set to false to use real API
-    
     // OAuth credentials - Production environment
     private let clientId = "MichaelP-GaragePi-PRD-724e805e6-b141c4fa"
     private let clientSecret = "YOUR_EBAY_SANDBOX_CLIENT_SECRET" // This will be ignored as we're using a provided token
@@ -55,17 +54,6 @@ class EbayApiService {
     // OAuth token storage - Using provided token
     private var authToken: String? = "YOUR_EBAY_USER_TOKEN"
     private var tokenExpirationDate: Date? = Date().addingTimeInterval(7200) // Set an expiration date 2 hours in the future
-    
-    // Public property to check if using mock data
-    var isUsingMockData: Bool {
-        return useMockData
-    }
-    
-    // Method to toggle mock data
-    func setUseMockData(_ value: Bool) {
-        useMockData = value
-        print("eBay API mock data mode set to: \(value)")
-    }
     
     // OAuth token acquisition - using pre-supplied token in production mode
     private func getOAuthToken() async -> Result<String, Error> {
@@ -125,40 +113,44 @@ class EbayApiService {
     
     // Basic function to search eBay
     func searchCompletedItems(keyword: String) async -> Result<EbaySearchResult, Error> {
-        // Use mock data if enabled
-        if useMockData {
-            print("Using mock data for search: \"\(keyword)\"")
-            return createMockData(keyword: keyword)
-        }
-        
         // Get OAuth token first
         let tokenResult = await getOAuthToken()
         
         switch tokenResult {
         case .failure(let error):
             print("Failed to get OAuth token: \(error.localizedDescription)")
-            // Fall back to mock data on authentication error
-            return createMockData(keyword: keyword)
+            return .failure(error)
             
         case .success(let token):
-            // Clean up the search term
-            let searchTerm = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Clean up the search term and remove any asterisks or special formatting
+            let searchTerm = keyword
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "**", with: "")
+                .replacingOccurrences(of: "*", with: "")
             
-            // Create eBay API URL - now using OAuth with sandbox support
-            let baseUrl = isSandboxMode ? "https://api.sandbox.ebay.com" : "https://api.ebay.com"
+            // Create eBay API URL - using a simplified approach to avoid encoding issues
+            let baseUrl = "https://api.ebay.com"
             
-            // Sandbox usually doesn't have real data, so we need to modify our filters
-            var urlString: String
-            if isSandboxMode {
-                // Simpler query for sandbox - no filters as sandbox likely doesn't have soldItems
-                urlString = "\(baseUrl)/buy/browse/v1/item_summary/search?q=\(searchTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&limit=10"
-                print("Using simplified query for sandbox")
-            } else {
-                // Production query with soldItems filter
-                urlString = "\(baseUrl)/buy/browse/v1/item_summary/search?q=\(searchTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&filter=soldItems:true&limit=10"
+            // Simplify the query to just basic search with no complex filters
+            guard var urlComponents = URLComponents(string: "\(baseUrl)/buy/browse/v1/item_summary/search") else {
+                return .failure(EbayError.networkError("Invalid URL components"))
             }
             
-            guard let url = URL(string: urlString) else {
+            // Add query parameters individually to ensure proper encoding
+            var queryItems = [
+                URLQueryItem(name: "q", value: searchTerm),
+                URLQueryItem(name: "limit", value: "10")
+            ]
+            
+            // Attempt to add filters that are properly URL encoded
+            if !isSandboxMode {
+                queryItems.append(URLQueryItem(name: "filter", value: "buyingOptions:{FIXED_PRICE}"))
+                queryItems.append(URLQueryItem(name: "filter", value: "itemLocationCountry:US"))
+            }
+            
+            urlComponents.queryItems = queryItems
+            
+            guard let url = urlComponents.url else {
                 return .failure(EbayError.networkError("Invalid URL"))
             }
             
@@ -191,22 +183,40 @@ class EbayApiService {
                         }
                     }
                     
-                    // Check if we should fall back to mock data on server error
-                    if httpResponse.statusCode == 500 || httpResponse.statusCode == 401 {
-                        print("Server error \(httpResponse.statusCode) - falling back to mock data")
-                        return createMockData(keyword: keyword)
-                    }
-                    
                     return .failure(EbayError.networkError("Server error: \(httpResponse.statusCode)"))
                 }
                 
-                // JSON parsing updated for OAuth response format
-                return parseOAuthResponse(data: data)
+                // Try a general search if specific search returns no results
+                let result = parseOAuthResponse(data: data)
+                if case .failure(EbayError.noItemsFound) = result {
+                    // Try again with a more general search term
+                    let generalSearchTerm = searchTerm.split(separator: " ").prefix(2).joined(separator: " ")
+                    if generalSearchTerm != searchTerm && !generalSearchTerm.isEmpty {
+                        print("No results found, trying more general search: \(generalSearchTerm)")
+                        
+                        // Update URL components with the more general search term
+                        urlComponents.queryItems?[0] = URLQueryItem(name: "q", value: generalSearchTerm)
+                        
+                        if let newUrl = urlComponents.url {
+                            var newRequest = URLRequest(url: newUrl)
+                            newRequest.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                            newRequest.addValue("application/json", forHTTPHeaderField: "Accept")
+                            newRequest.addValue("en-US", forHTTPHeaderField: "Accept-Language")
+                            newRequest.addValue("EBAY-US", forHTTPHeaderField: "X-EBAY-C-MARKETPLACE-ID")
+                            
+                            let (newData, newResponse) = try await URLSession.shared.data(for: newRequest)
+                            
+                            if let newHttpResponse = newResponse as? HTTPURLResponse, newHttpResponse.statusCode == 200 {
+                                return parseOAuthResponse(data: newData)
+                            }
+                        }
+                    }
+                }
+                
+                return result
             } catch {
                 print("Network error: \(error.localizedDescription)")
-                // Fall back to mock data on error
-                print("Network error - falling back to mock data")
-                return createMockData(keyword: keyword)
+                return .failure(error)
             }
         }
     }
@@ -240,6 +250,8 @@ class EbayApiService {
             
             var items: [EbayItem] = []
             var totalPrice: Double = 0
+            var lowestPrice: Double = Double.greatestFiniteMagnitude
+            var highestPrice: Double = 0
             
             for itemJson in itemSummaries {
                 // Basic item parsing adapted for Browse API response
@@ -264,6 +276,14 @@ class EbayApiService {
                     
                     items.append(item)
                     totalPrice += price
+                    
+                    // Update lowest and highest prices
+                    if price < lowestPrice {
+                        lowestPrice = price
+                    }
+                    if price > highestPrice {
+                        highestPrice = price
+                    }
                 }
             }
             
@@ -271,10 +291,18 @@ class EbayApiService {
                 return .failure(EbayError.noItemsFound)
             }
             
+            // If we only have one item, set low and high to the same value
+            if items.count == 1 {
+                lowestPrice = items[0].price
+                highestPrice = items[0].price
+            }
+            
             let averagePrice = totalPrice / Double(items.count)
             
             let result = EbaySearchResult(
                 averagePrice: averagePrice,
+                lowestPrice: lowestPrice,
+                highestPrice: highestPrice,
                 itemCount: items.count,
                 items: items
             )
@@ -283,69 +311,6 @@ class EbayApiService {
         } catch {
             return .failure(EbayError.parsingError(error.localizedDescription))
         }
-    }
-    
-    // Mock data for testing
-    private func createMockData(keyword: String) -> Result<EbaySearchResult, Error> {
-        // Create more items and better pricing estimates based on the keyword
-        var basePrice = 29.99 // default base price
-        
-        // Adjust price based on keywords
-        let lowercaseKeyword = keyword.lowercased()
-        if lowercaseKeyword.contains("jordan") || lowercaseKeyword.contains("nike") {
-            basePrice = 179.99
-        } else if lowercaseKeyword.contains("iphone") || lowercaseKeyword.contains("apple") {
-            basePrice = 349.99
-        } else if lowercaseKeyword.contains("vintage") || lowercaseKeyword.contains("antique") {
-            basePrice = 89.99
-        } else if lowercaseKeyword.contains("game") || lowercaseKeyword.contains("console") {
-            basePrice = 149.99
-        } else if lowercaseKeyword.contains("jewelry") || lowercaseKeyword.contains("gold") {
-            basePrice = 249.99
-        }
-        
-        // Generate 3-7 items with price variations
-        let itemCount = Int.random(in: 3...7)
-        var items: [EbayItem] = []
-        
-        for i in 1...itemCount {
-            // Add some random price variation (±20%)
-            let variation = Double.random(in: -0.2...0.2)
-            let price = basePrice * (1.0 + variation)
-            
-            // Pick a condition
-            let conditions = ["New", "Used", "Very Good", "Good", "Acceptable", "Like New"]
-            let condition = conditions[Int.random(in: 0..<conditions.count)]
-            
-            // Create title with variations
-            var title = keyword
-            if i % 3 == 0 {
-                title += " - Authentic"
-            } else if i % 3 == 1 {
-                title += " - Great Deal"
-            }
-            title += " (Item \(i))"
-            
-            let item = EbayItem(
-                title: title,
-                price: price,
-                imageUrl: "https://example.com/image\(i).jpg",
-                condition: condition
-            )
-            
-            items.append(item)
-        }
-        
-        let totalPrice = items.reduce(0.0) { $0 + $1.price }
-        let averagePrice = totalPrice / Double(items.count)
-        
-        let result = EbaySearchResult(
-            averagePrice: averagePrice,
-            itemCount: items.count,
-            items: items
-        )
-        
-        return .success(result)
     }
     
     // Basic parsing function for legacy Finding API (keeping for fallback if needed)
@@ -405,6 +370,8 @@ class EbayApiService {
             
             let result = EbaySearchResult(
                 averagePrice: averagePrice,
+                lowestPrice: averagePrice,
+                highestPrice: averagePrice,
                 itemCount: items.count,
                 items: items
             )

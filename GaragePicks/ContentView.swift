@@ -20,7 +20,7 @@ struct ContentView: View {
     @State private var priceError: String? = nil
     @State private var searchQuery: String? = nil
     @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
-    @State private var useMockData: Bool = false // Track mock data preference
+    @State private var itemPrices: [String: (isLoading: Bool, result: EbaySearchResult?, error: String?)] = [:]
     
     private let ebayService = EbayApiService()
     
@@ -122,13 +122,6 @@ struct ContentView: View {
     
     var analysisTabContent: some View {
         VStack(spacing: 16) {
-            // Add mock data toggle
-            Toggle("Use Mock Data", isOn: $useMockData)
-                .padding(.horizontal)
-                .onChange(of: useMockData) { newValue in
-                    ebayService.setUseMockData(newValue)
-                }
-            
             if !analysisResults.isEmpty {
                 VStack(alignment: .leading) {
                     Text("Analysis Results:")
@@ -149,21 +142,87 @@ struct ContentView: View {
                         .padding(.horizontal)
                     
                     ForEach(identifiedItems, id: \.self) { item in
-                        HStack {
-                            Text(item)
-                                .lineLimit(2)
-                            Spacer()
-                            Button(action: {
-                                searchEbayForItem(item)
-                            }) {
-                                Text(selectedItemForPricing == item && isPriceLoading ? "Loading..." : "Check Price")
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.blue)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(8)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(item)
+                                    .lineLimit(2)
+                                    .font(.headline)
+                                Spacer()
                             }
-                            .disabled(isPriceLoading)
+                            
+                            if let itemData = itemPrices[item] {
+                                if itemData.isLoading {
+                                    HStack {
+                                        Spacer()
+                                        ProgressView("Loading prices...")
+                                            .font(.caption)
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 4)
+                                } else if let result = itemData.result {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Average: $\(String(format: "%.2f", result.averagePrice))")
+                                            .fontWeight(.bold)
+                                        HStack {
+                                            Text("Low: $\(String(format: "%.2f", result.lowestPrice))")
+                                            Spacer()
+                                            Text("High: $\(String(format: "%.2f", result.highestPrice))")
+                                        }
+                                        .font(.caption)
+                                        Text("Based on \(result.itemCount) sales")
+                                            .font(.caption)
+                                            .foregroundColor(.gray)
+                                        
+                                        Button(action: {
+                                            selectedItemForPricing = item
+                                            priceResults = result
+                                            activeTab = 2 // Go to pricing tab
+                                        }) {
+                                            Text("View Details")
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color.blue)
+                                                .foregroundColor(.white)
+                                                .cornerRadius(8)
+                                                .font(.caption)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .trailing)
+                                    }
+                                    .padding(.vertical, 4)
+                                } else if let error = itemData.error {
+                                    HStack {
+                                        Text("⚠️ \(error)")
+                                            .font(.caption)
+                                            .foregroundColor(.red)
+                                        Spacer()
+                                        Button(action: {
+                                            fetchPriceForItem(item)
+                                        }) {
+                                            Text("Retry")
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color.blue)
+                                                .foregroundColor(.white)
+                                                .cornerRadius(8)
+                                                .font(.caption)
+                                        }
+                                    }
+                                }
+                            } else {
+                                HStack {
+                                    Spacer()
+                                    Button(action: {
+                                        fetchPriceForItem(item)
+                                    }) {
+                                        Text("Check Price")
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.blue)
+                                            .foregroundColor(.white)
+                                            .cornerRadius(8)
+                                    }
+                                }
+                            }
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal)
@@ -193,16 +252,6 @@ struct ContentView: View {
                         Text("Search terms: \(query)")
                             .font(.caption)
                             .foregroundColor(.gray)
-                    }
-                    
-                    if ebayService.isUsingMockData {
-                        Text("⚠️ USING SIMULATED DATA (due to eBay API rate limits)")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .background(Color(.systemGray6))
-                            .cornerRadius(4)
                     }
                     
                     Group {
@@ -486,6 +535,11 @@ struct ContentView: View {
         
         DispatchQueue.main.async {
             self.identifiedItems = items
+            
+            // Automatically fetch prices for each item
+            for item in items {
+                fetchPriceForItem(item)
+            }
         }
     }
     
@@ -503,63 +557,45 @@ struct ContentView: View {
             .map { String($0) }
     }
     
-    func searchEbayForItem(_ item: String) {
-        // Clean up the search query first
+    // Fetch price for a single item
+    func fetchPriceForItem(_ item: String) {
+        // Set loading state for this item
+        itemPrices[item] = (isLoading: true, result: nil, error: nil)
+        
+        // Clean up the search query - more thorough cleaning
         let cleanQuery = item
             .replacingOccurrences(of: "**", with: "")
             .replacingOccurrences(of: "*", with: "")
             .replacingOccurrences(of: " - ", with: " ")
-        
-        selectedItemForPricing = item
-        isPriceLoading = true
-        priceError = nil
-        priceResults = nil
-        searchQuery = cleanQuery
-        
-        // Force switch to the pricing tab to show loading state
-        activeTab = 2
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         
         Task {
-            do {
-                let result = await ebayService.searchCompletedItems(keyword: cleanQuery)
-                
-                DispatchQueue.main.async {
-                    isPriceLoading = false
+            let result = await ebayService.searchCompletedItems(keyword: cleanQuery)
+            
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let searchResult):
+                    // Update the price info for this item
+                    itemPrices[item] = (isLoading: false, result: searchResult, error: nil)
+                    print("Found \(searchResult.itemCount) items for \(item) with price range: $\(searchResult.lowestPrice) - $\(searchResult.highestPrice)")
                     
-                    switch result {
-                    case .success(let searchResult):
-                        self.priceResults = searchResult
-                        print("Found \(searchResult.itemCount) items with average price: $\(searchResult.averagePrice)")
-                        // Ensure the pricing tab is active
-                        activeTab = 2
-                        
-                    case .failure(let error):
-                        if let ebayError = error as? EbayError {
-                            switch ebayError {
-                            case .noItemsFound:
-                                self.priceError = "No items found on eBay matching this search. Try a more general search term."
-                            case .networkError(let message):
-                                self.priceError = "Network error: \(message)"
-                            case .parsingError(let message):
-                                self.priceError = "Error parsing data: \(message)"
-                            case .authenticationError(let message):
-                                self.priceError = "Authentication error: \(message)"
-                            }
-                        } else {
-                            self.priceError = error.localizedDescription
+                case .failure(let error):
+                    var errorMessage = "No price data available"
+                    
+                    if let ebayError = error as? EbayError {
+                        switch ebayError {
+                        case .noItemsFound:
+                            errorMessage = "No items found on eBay"
+                        case .networkError(let message), .parsingError(let message), .authenticationError(let message):
+                            errorMessage = message
                         }
-                        print("eBay search error: \(error.localizedDescription)")
-                        // Ensure error is shown on pricing tab
-                        activeTab = 2
-                        GaragePicksApp.errorManager.logError(error.localizedDescription)
+                    } else {
+                        errorMessage = error.localizedDescription
                     }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    isPriceLoading = false
-                    priceError = error.localizedDescription
-                    print("Unexpected error during eBay search: \(error.localizedDescription)")
-                    activeTab = 2
+                    
+                    // Update the error state for this item
+                    itemPrices[item] = (isLoading: false, result: nil, error: errorMessage)
+                    print("eBay search error for \(item): \(error.localizedDescription)")
                 }
             }
         }
