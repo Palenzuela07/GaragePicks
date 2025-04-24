@@ -21,6 +21,8 @@ struct ContentView: View {
     @State private var searchQuery: String? = nil
     @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
     @State private var itemPrices: [String: (isLoading: Bool, result: EbaySearchResult?, error: String?)] = [:]
+    @State private var displayedListingCount: Int = 5 // Number of listings to display initially
+    @State private var loadedItemLimit: Int = 25 // Default number of eBay results to load
     
     private let ebayService = EbayApiService()
     
@@ -271,6 +273,7 @@ struct ContentView: View {
                                     Button(action: {
                                         selectedItemForPricing = item
                                         priceResults = result
+                                        displayedListingCount = 5 // Reset to initial count when changing items
                                         activeTab = 2 // Go to pricing tab
                                     }) {
                                         Text("View Details")
@@ -376,7 +379,7 @@ struct ContentView: View {
                             .font(.headline)
                             .padding(.top, 12)
                         
-                        ForEach(priceResults.items.prefix(5), id: \.title) { item in
+                        ForEach(priceResults.items.prefix(displayedListingCount), id: \.title) { item in
                             HStack(alignment: .top, spacing: 12) {
                                 // Image of the item
                                 ZStack {
@@ -460,6 +463,52 @@ struct ContentView: View {
                             .cornerRadius(10)
                             .padding(.vertical, 4)
                         }
+                        
+                        // "Load More" button
+                        if priceResults.items.count > displayedListingCount {
+                            Button(action: {
+                                // Increase displayed items count (with a reasonable maximum)
+                                displayedListingCount = min(displayedListingCount + 5, priceResults.items.count)
+                            }) {
+                                HStack {
+                                    Text("Load More Results")
+                                    Image(systemName: "arrow.down.circle.fill")
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 24)
+                                .background(Color.blue)
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 8)
+                        }
+                        
+                        // "Load More from eBay" button (only if we're displaying all current results)
+                        if displayedListingCount >= priceResults.items.count && loadedItemLimit < 200 {
+                            Button(action: {
+                                // Load more items from eBay API
+                                fetchMoreEbayResults()
+                            }) {
+                                HStack {
+                                    Text("Search for More on eBay")
+                                    Image(systemName: "magnifyingglass.circle.fill")
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 24)
+                                .background(Color.green)
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 8)
+                        }
+                        
+                        // Display count information
+                        Text("Showing \(min(displayedListingCount, priceResults.items.count)) of \(priceResults.items.count) items")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     } else {
                         Text("No individual listings available to display")
                             .foregroundColor(.gray)
@@ -860,6 +909,55 @@ struct ContentView: View {
                 return confidenceColor
             } else {
                 return Color(.systemGray5)
+            }
+        }
+    }
+    
+    // Add this new function to load more results from eBay
+    private func fetchMoreEbayResults() {
+        guard let item = selectedItemForPricing else { return }
+        
+        // Double the number of items to load
+        loadedItemLimit = min(loadedItemLimit * 2, 200)
+        isPriceLoading = true
+        
+        Task {
+            // Use the same cleanQuery logic as in fetchPriceForItem
+            let cleanQuery = item
+                .replacingOccurrences(of: "**", with: "")
+                .replacingOccurrences(of: "*", with: "")
+                .replacingOccurrences(of: " - ", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                
+            let result = await ebayService.searchCompletedItems(keyword: cleanQuery, itemLimit: loadedItemLimit)
+            
+            DispatchQueue.main.async {
+                isPriceLoading = false
+                
+                switch result {
+                case .success(let searchResult):
+                    priceResults = searchResult
+                    itemPrices[item] = (isLoading: false, result: searchResult, error: nil)
+                    print("Loaded \(searchResult.itemCount) items from eBay")
+                    
+                    // Reset displayed count to show we have new items
+                    displayedListingCount = min(displayedListingCount + 5, searchResult.items.count)
+                    
+                case .failure(let error):
+                    print("Error loading more results: \(error.localizedDescription)")
+                    // Keep existing results but show error
+                    var errorMessage = "Failed to load more results"
+                    if let ebayError = error as? EbayError {
+                        switch ebayError {
+                        case .noItemsFound:
+                            errorMessage = "No additional items found"
+                        case .networkError(let message), .parsingError(let message), .authenticationError(let message):
+                            errorMessage = message
+                        }
+                    }
+                    // Show error alert or message
+                    priceError = errorMessage
+                }
             }
         }
     }

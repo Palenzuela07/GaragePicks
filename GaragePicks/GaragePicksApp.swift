@@ -9,21 +9,51 @@ import SwiftUI
 
 @main
 struct GaragePicksApp: App {
-    // Simple error manager as a singleton with lazy initialization
-    static let errorManager: ErrorManager = {
-        // Initialize safely
-        let manager = ErrorManager()
-        print("Error manager initialized successfully")
-        return manager
-    }()
+    // Use a lazy property wrapper instead of static initialization
+    private let errorManager = ErrorManager()
+    
+    // Add state for tracking initialization
+    @State private var isInitialized = false
+    
+    init() {
+        // Add any debug logging here
+        print("GaragePicksApp initializing...")
+        
+        // Set up error handling for uncaught exceptions
+        NSSetUncaughtExceptionHandler { exception in
+            print("UNCAUGHT EXCEPTION: \(exception)")
+            print("Reason: \(exception.reason ?? "unknown")")
+            print("Stack trace: \(exception.callStackSymbols.joined(separator: "\n"))")
+        }
+    }
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .onAppear {
-                    // Print a startup message to verify app initialization
-                    print("GaragePicks app started successfully")
+            ZStack {
+                // Wrap ContentView in a safe initialization
+                if isInitialized {
+                    ContentView()
+                } else {
+                    // Show a loading view until initialization is complete
+                    ProgressView("Loading...")
+                        .onAppear {
+                            // Delay initialization slightly to ensure UI is ready
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                do {
+                                    // Initialize app safely
+                                    print("Safe initialization starting...")
+                                    isInitialized = true
+                                    print("Safe initialization complete")
+                                } catch {
+                                    print("ERROR during initialization: \(error.localizedDescription)")
+                                }
+                            }
+                        }
                 }
+            }
+            .onAppear {
+                print("GaragePicksApp appeared successfully")
+            }
         }
     }
 }

@@ -113,7 +113,7 @@ class EbayApiService {
     }
     
     // Basic function to search eBay
-    func searchCompletedItems(keyword: String) async -> Result<EbaySearchResult, Error> {
+    func searchCompletedItems(keyword: String, itemLimit: Int = 25) async -> Result<EbaySearchResult, Error> {
         // Get OAuth token first
         let tokenResult = await getOAuthToken()
         
@@ -140,7 +140,7 @@ class EbayApiService {
             // Add query parameters individually to ensure proper encoding
             var queryItems = [
                 URLQueryItem(name: "q", value: searchTerm),
-                URLQueryItem(name: "limit", value: "10")
+                URLQueryItem(name: "limit", value: String(min(itemLimit, 200))) // eBay API has a max limit of 200
             ]
             
             // Attempt to add filters that are properly URL encoded
