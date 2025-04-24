@@ -24,6 +24,40 @@ struct ContentView: View {
     
     private let ebayService = EbayApiService()
     
+    // Computed property for sorted items by average price (highest to lowest)
+    private var sortedItemsByPrice: [String] {
+        // Create a list of tuples with (item, price) for sorting
+        let itemsWithPrices = identifiedItems.map { item -> (String, Double) in
+            if let priceData = itemPrices[item], let result = priceData.result {
+                return (item, result.averagePrice)
+            } else {
+                return (item, -1) // -1 for items without price data yet
+            }
+        }
+        
+        // Sort items by price (highest first), with unpriced items at the end
+        let sortedItems = itemsWithPrices.sorted { item1, item2 in
+            // If both have valid prices, compare them
+            if item1.1 >= 0 && item2.1 >= 0 {
+                return item1.1 > item2.1 // Descending order
+            }
+            // If only one has a valid price, prioritize it
+            else if item1.1 >= 0 {
+                return true
+            }
+            else if item2.1 >= 0 {
+                return false
+            }
+            // If neither has a price, keep original order
+            else {
+                return identifiedItems.firstIndex(of: item1.0)! < identifiedItems.firstIndex(of: item2.0)!
+            }
+        }
+        
+        // Return just the item names
+        return sortedItems.map { $0.0 }
+    }
+    
     var body: some View {
         VStack {
             // Tab buttons at top
@@ -141,7 +175,7 @@ struct ContentView: View {
                         .font(.headline)
                         .padding(.horizontal)
                     
-                    ForEach(identifiedItems, id: \.self) { item in
+                    ForEach(sortedItemsByPrice, id: \.self) { item in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(item)
@@ -174,6 +208,16 @@ struct ContentView: View {
                                             Text("Based on \(result.itemCount) sales")
                                                 .font(.caption)
                                                 .foregroundColor(.gray)
+                                            
+                                            // Add similarity/confidence indicator
+                                            let confidence = calculateConfidence(item: item, results: result)
+                                            HStack {
+                                                Text("Match confidence:")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.gray)
+                                                ConfidenceIndicator(level: confidence)
+                                            }
+                                            .padding(.top, 2)
                                         }
                                         
                                         Spacer()
@@ -203,6 +247,26 @@ struct ContentView: View {
                                         }
                                     }
                                     .padding(.vertical, 4)
+                                    
+                                    // Show best matching item details
+                                    if let bestMatch = result.items.first {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Best match:")
+                                                .font(.caption)
+                                                .foregroundColor(.gray)
+                                            Text(bestMatch.title)
+                                                .font(.caption)
+                                                .lineLimit(2)
+                                                .padding(.bottom, 2)
+                                            
+                                            if !bestMatch.condition.isEmpty {
+                                                Text("Condition: \(bestMatch.condition)")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.gray)
+                                            }
+                                        }
+                                        .padding(.vertical, 2)
+                                    }
                                     
                                     Button(action: {
                                         selectedItemForPricing = item
@@ -357,18 +421,37 @@ struct ContentView: View {
                                         Text("$\(String(format: "%.2f", item.price))")
                                             .font(.headline)
                                             .foregroundColor(.green)
+                                        
                                         Spacer()
-                                        Text(item.condition)
-                                            .font(.caption)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 2)
-                                            .background(Color(.systemGray5))
-                                            .cornerRadius(4)
+                                        
+                                        // Always display sold date with more prominence
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "calendar")
+                                                .font(.caption)
+                                            Text(item.soldDate ?? "Recently")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(4)
                                     }
                                     
                                     Text(item.title)
                                         .font(.subheadline)
                                         .lineLimit(2)
+                                    
+                                    HStack {
+                                        Text(item.condition)
+                                            .font(.caption)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color(.systemGray5))
+                                            .cornerRadius(4)
+                                            
+                                        Spacer()
+                                    }
                                 }
                                 .frame(maxWidth: .infinity)
                             }
@@ -685,6 +768,98 @@ struct ContentView: View {
                     itemPrices[item] = (isLoading: false, result: nil, error: errorMessage)
                     print("eBay search error for \(item): \(error.localizedDescription)")
                 }
+            }
+        }
+    }
+    
+    // Add this function to calculate match confidence
+    private func calculateConfidence(item: String, results: EbaySearchResult) -> Double {
+        // Simple implementation for now - can be enhanced with more sophisticated matching
+        
+        // Start with base confidence level depending on number of results
+        var confidence = min(0.5 + (Double(results.itemCount) / 20.0), 0.9)
+        
+        // Check if item name appears in the first result title (best match)
+        if let firstTitle = results.items.first?.title.lowercased() {
+            let itemWords = item.lowercased().split(separator: " ")
+            var wordMatchCount = 0
+            
+            for word in itemWords where word.count > 3 {  // Only consider meaningful words
+                if firstTitle.contains(word.lowercased()) {
+                    wordMatchCount += 1
+                }
+            }
+            
+            // Boost confidence based on word matches
+            let matchRatio = Double(wordMatchCount) / Double(max(1, itemWords.count))
+            confidence = min(confidence + (matchRatio * 0.4), 1.0)
+        }
+        
+        // Price consistency also factors into confidence
+        let priceRange = results.highestPrice - results.lowestPrice
+        let priceVariation = priceRange / max(1.0, results.averagePrice)
+        
+        // If prices are consistent (low variation), increase confidence
+        if priceVariation < 0.5 {
+            confidence = min(confidence + 0.1, 1.0)
+        } else if priceVariation > 1.0 {
+            // High variation might indicate mixed results
+            confidence = max(confidence - 0.1, 0.0)
+        }
+        
+        return confidence
+    }
+    
+    // Add a confidence indicator view
+    struct ConfidenceIndicator: View {
+        let level: Double  // 0.0 to 1.0
+        
+        var body: some View {
+            HStack(spacing: 2) {
+                ForEach(0..<5) { index in
+                    Rectangle()
+                        .fill(colorForLevel(index: index))
+                        .frame(width: 10, height: 6)
+                        .cornerRadius(1)
+                }
+                
+                Text(confidenceText)
+                    .font(.caption2)
+                    .foregroundColor(confidenceColor)
+                    .padding(.leading, 4)
+            }
+        }
+        
+        private var confidenceText: String {
+            if level < 0.3 {
+                return "Low"
+            } else if level < 0.6 {
+                return "Medium"
+            } else if level < 0.8 {
+                return "Good"
+            } else {
+                return "High"
+            }
+        }
+        
+        private var confidenceColor: Color {
+            if level < 0.3 {
+                return .red
+            } else if level < 0.6 {
+                return .orange
+            } else if level < 0.8 {
+                return .blue
+            } else {
+                return .green
+            }
+        }
+        
+        private func colorForLevel(index: Int) -> Color {
+            let threshold = Double(index + 1) / 5.0
+            if level >= threshold {
+                return confidenceColor
+            } else {
+                return Color(.systemGray5)
             }
         }
     }
