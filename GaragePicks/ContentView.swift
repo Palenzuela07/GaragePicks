@@ -160,35 +160,64 @@ struct ContentView: View {
                                     }
                                     .padding(.vertical, 4)
                                 } else if let result = itemData.result {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Average: $\(String(format: "%.2f", result.averagePrice))")
-                                            .fontWeight(.bold)
-                                        HStack {
-                                            Text("Low: $\(String(format: "%.2f", result.lowestPrice))")
-                                            Spacer()
-                                            Text("High: $\(String(format: "%.2f", result.highestPrice))")
-                                        }
-                                        .font(.caption)
-                                        Text("Based on \(result.itemCount) sales")
+                                    HStack(alignment: .top) {
+                                        // Price info
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Average: $\(String(format: "%.2f", result.averagePrice))")
+                                                .fontWeight(.bold)
+                                            HStack {
+                                                Text("Low: $\(String(format: "%.2f", result.lowestPrice))")
+                                                Spacer()
+                                                Text("High: $\(String(format: "%.2f", result.highestPrice))")
+                                            }
                                             .font(.caption)
-                                            .foregroundColor(.gray)
-                                        
-                                        Button(action: {
-                                            selectedItemForPricing = item
-                                            priceResults = result
-                                            activeTab = 2 // Go to pricing tab
-                                        }) {
-                                            Text("View Details")
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(Color.blue)
-                                                .foregroundColor(.white)
-                                                .cornerRadius(8)
+                                            Text("Based on \(result.itemCount) sales")
                                                 .font(.caption)
+                                                .foregroundColor(.gray)
                                         }
-                                        .frame(maxWidth: .infinity, alignment: .trailing)
+                                        
+                                        Spacer()
+                                        
+                                        // Thumbnail image (if available)
+                                        if let firstItem = result.items.first, let imageUrl = firstItem.imageUrl, let url = URL(string: imageUrl) {
+                                            AsyncImage(url: url) { phase in
+                                                switch phase {
+                                                case .empty:
+                                                    ProgressView()
+                                                        .frame(width: 50, height: 50)
+                                                case .success(let image):
+                                                    image
+                                                        .resizable()
+                                                        .aspectRatio(contentMode: .fill)
+                                                        .frame(width: 50, height: 50)
+                                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                                case .failure:
+                                                    EmptyView()
+                                                @unknown default:
+                                                    EmptyView()
+                                                }
+                                            }
+                                            .frame(width: 50, height: 50)
+                                            .background(Color(.systemGray5))
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        }
                                     }
                                     .padding(.vertical, 4)
+                                    
+                                    Button(action: {
+                                        selectedItemForPricing = item
+                                        priceResults = result
+                                        activeTab = 2 // Go to pricing tab
+                                    }) {
+                                        Text("View Details")
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.blue)
+                                            .foregroundColor(.white)
+                                            .cornerRadius(8)
+                                            .font(.caption)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
                                 } else if let error = itemData.error {
                                     HStack {
                                         Text("⚠️ \(error)")
@@ -254,35 +283,94 @@ struct ContentView: View {
                             .foregroundColor(.gray)
                     }
                     
-                    Group {
-                        Text("Average Price: $\(String(format: "%.2f", priceResults.averagePrice))")
-                        
-                        Text("Based on \(priceResults.itemCount) sold listings")
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Average Price: $\(String(format: "%.2f", priceResults.averagePrice))")
+                                .font(.title3)
+                                .fontWeight(.bold)
+                            
+                            HStack {
+                                Text("Low: $\(String(format: "%.2f", priceResults.lowestPrice))")
+                                Spacer()
+                                Text("High: $\(String(format: "%.2f", priceResults.highestPrice))")
+                            }
+                            .font(.subheadline)
+                            
+                            Text("Based on \(priceResults.itemCount) sold listings")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                                .padding(.top, 2)
+                        }
                     }
-                    .font(.subheadline)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(10)
                     
                     if !priceResults.items.isEmpty {
                         Text("Recent Sales:")
                             .font(.headline)
-                            .padding(.top, 4)
+                            .padding(.top, 12)
                         
                         ForEach(priceResults.items.prefix(5), id: \.title) { item in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text("$\(String(format: "%.2f", item.price))")
-                                        .font(.headline)
-                                    Spacer()
-                                    Text(item.condition)
-                                        .font(.caption)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 2)
-                                        .background(Color(.systemGray5))
-                                        .cornerRadius(4)
+                            HStack(alignment: .top, spacing: 12) {
+                                // Image of the item
+                                ZStack {
+                                    if let imageUrl = item.imageUrl, let url = URL(string: imageUrl) {
+                                        AsyncImage(url: url) { phase in
+                                            switch phase {
+                                            case .empty:
+                                                ProgressView()
+                                                    .frame(width: 80, height: 80)
+                                            case .success(let image):
+                                                image
+                                                    .resizable()
+                                                    .aspectRatio(contentMode: .fill)
+                                                    .frame(width: 80, height: 80)
+                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            case .failure:
+                                                Image(systemName: "photo")
+                                                    .resizable()
+                                                    .aspectRatio(contentMode: .fit)
+                                                    .frame(width: 40, height: 40)
+                                                    .foregroundColor(.gray)
+                                                    .frame(width: 80, height: 80)
+                                            @unknown default:
+                                                EmptyView()
+                                            }
+                                        }
+                                    } else {
+                                        Image(systemName: "photo")
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 40, height: 40)
+                                            .foregroundColor(.gray)
+                                            .frame(width: 80, height: 80)
+                                    }
                                 }
+                                .background(Color(.systemGray5))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                                 
-                                Text(item.title)
-                                    .font(.caption)
-                                    .lineLimit(2)
+                                // Item details
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text("$\(String(format: "%.2f", item.price))")
+                                            .font(.headline)
+                                            .foregroundColor(.green)
+                                        Spacer()
+                                        Text(item.condition)
+                                            .font(.caption)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 2)
+                                            .background(Color(.systemGray5))
+                                            .cornerRadius(4)
+                                    }
+                                    
+                                    Text(item.title)
+                                        .font(.subheadline)
+                                        .lineLimit(2)
+                                }
+                                .frame(maxWidth: .infinity)
                             }
                             .padding()
                             .background(Color(.systemGray6))
