@@ -46,41 +46,48 @@ struct OAuthToken: Codable {
 
 // Basic eBay API Service
 class EbayApiService {
-    // OAuth credentials - Production environment
-    private let clientId = "MichaelP-GaragePi-PRD-724e805e6-b141c4fa"
-    private let clientSecret = "YOUR_EBAY_SANDBOX_CLIENT_SECRET" // This will be ignored as we're using a provided token
+    // OAuth credentials 
+    private let clientId = "MichaelP-GaragePi-PRD-724e805e6-b141c4fa" // Production Client ID
+    private let clientSecret = "YOUR_EBAY_CLIENT_SECRET" // Production Client Secret
     private let scope = "https://api.ebay.com/oauth/api_scope"
-    private let isSandboxMode = false // Switch to production mode
+    private let isSandboxMode = false // Using production mode
+    
+    // Flag to use mock data instead of real API
+    private let useMockData = false // Use real eBay API data
     
     // OAuth token storage - Using provided token
-    private var authToken: String? = "YOUR_EBAY_USER_TOKEN"
-    private var tokenExpirationDate: Date? = Date().addingTimeInterval(7200) // Set an expiration date 2 hours in the future
+    private var authToken: String? = nil // Set to nil to force token request
+    private var tokenExpirationDate: Date? = nil // Reset expiration date
     
     // OAuth token acquisition - using pre-supplied token in production mode
     private func getOAuthToken() async -> Result<String, Error> {
+        print("🔑 Starting OAuth token request process")
+        
         // Check if we have a valid token already
         if let token = authToken, let expirationDate = tokenExpirationDate, expirationDate > Date() {
+            print("✅ Using existing valid token that expires at \(expirationDate)")
             return .success(token)
         }
         
-        // If we're using a pre-supplied production token and it's expired, notify user
-        if !isSandboxMode {
-            // Check if token is initialized but expired
-            if authToken != nil && (tokenExpirationDate == nil || tokenExpirationDate! <= Date()) {
-                return .failure(EbayError.authenticationError("Pre-supplied eBay token has expired. Please provide a new token."))
-            }
-        }
+        print("⚠️ No valid token found, requesting new token")
         
         // For sandbox mode or if token isn't pre-supplied, request new token
         let baseUrl = isSandboxMode ? "https://api.sandbox.ebay.com" : "https://api.ebay.com"
         guard let url = URL(string: "\(baseUrl)/identity/v1/oauth2/token") else {
+            print("❌ Invalid OAuth URL")
             return .failure(EbayError.authenticationError("Invalid OAuth URL"))
         }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.addValue("Basic " + "\(clientId):\(clientSecret)".data(using: .utf8)!.base64EncodedString(), forHTTPHeaderField: "Authorization")
+        
+        // Encode credentials for Basic Authentication
+        let credentials = "\(clientId):\(clientSecret)".data(using: .utf8)!.base64EncodedString()
+        request.addValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+        
+        print("🔄 Making OAuth request to: \(url)")
+        print("🔑 Using client ID: \(clientId)")
         
         let bodyParameters = "grant_type=client_credentials&scope=\(scope)"
         request.httpBody = bodyParameters.data(using: .utf8)
@@ -89,14 +96,22 @@ class EbayApiService {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ Invalid response from OAuth endpoint")
                 return .failure(EbayError.authenticationError("Invalid response"))
             }
             
+            print("📊 OAuth response status: \(httpResponse.statusCode)")
+            
             if httpResponse.statusCode != 200 {
                 if let responseString = String(data: data, encoding: .utf8) {
-                    print("OAuth error response: \(responseString)")
+                    print("❌ OAuth error response: \(responseString)")
                 }
                 return .failure(EbayError.authenticationError("Failed to obtain token: \(httpResponse.statusCode)"))
+            }
+            
+            // Print the raw response for debugging
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("📝 Raw OAuth response: \(responseString)")
             }
             
             let decoder = JSONDecoder()
@@ -106,14 +121,26 @@ class EbayApiService {
             self.authToken = tokenResponse.accessToken
             self.tokenExpirationDate = Date().addingTimeInterval(Double(tokenResponse.expiresIn - 300)) // 5 minutes buffer
             
+            print("✅ Successfully obtained new token, expires in \(tokenResponse.expiresIn) seconds")
+            print("🔑 Token type: \(tokenResponse.tokenType)")
+            if let expiry = self.tokenExpirationDate {
+                print("⏰ Token will expire at: \(expiry)")
+            }
+            
             return .success(tokenResponse.accessToken)
         } catch {
+            print("❌ OAuth error: \(error.localizedDescription)")
             return .failure(EbayError.authenticationError("OAuth error: \(error.localizedDescription)"))
         }
     }
     
     // Basic function to search eBay
     func searchCompletedItems(keyword: String, itemLimit: Int = 25) async -> Result<EbaySearchResult, Error> {
+        if useMockData {
+            // Return mock data instead of calling the API
+            return generateMockResults(for: keyword, count: itemLimit)
+        }
+        
         // Get OAuth token first
         let tokenResult = await getOAuthToken()
         
@@ -435,5 +462,125 @@ class EbayApiService {
         } catch {
             return .failure(EbayError.parsingError(error.localizedDescription))
         }
+    }
+    
+    private func generateMockResults(for keyword: String, count: Int) -> Result<EbaySearchResult, Error> {
+        print("🔄 Generating mock results for: \(keyword)")
+        
+        // Create random number of items between 5 and count
+        let itemCount = min(max(5, Int.random(in: 5...count)), 25)
+        
+        // Determine more realistic base price based on product type keywords
+        let keywordLower = keyword.lowercased()
+        var basePrice: Double = 25.0 // Default base price
+        
+        // Common electronics
+        if keywordLower.contains("iphone") || keywordLower.contains("smartphone") {
+            basePrice = 300.0
+        } else if keywordLower.contains("ipad") || keywordLower.contains("tablet") {
+            basePrice = 250.0
+        } else if keywordLower.contains("laptop") || keywordLower.contains("macbook") {
+            basePrice = 600.0
+        } else if keywordLower.contains("camera") || keywordLower.contains("lens") {
+            basePrice = 150.0
+        } else if keywordLower.contains("tv") || keywordLower.contains("television") {
+            basePrice = 200.0
+        } else if keywordLower.contains("gaming") || keywordLower.contains("console") || keywordLower.contains("playstation") || keywordLower.contains("xbox") {
+            basePrice = 250.0
+        } 
+        // Clothing and accessories
+        else if keywordLower.contains("shoes") || keywordLower.contains("sneakers") {
+            basePrice = 70.0
+        } else if keywordLower.contains("watch") {
+            basePrice = 120.0
+        } else if keywordLower.contains("jacket") || keywordLower.contains("coat") {
+            basePrice = 60.0
+        } 
+        // Home items
+        else if keywordLower.contains("furniture") || keywordLower.contains("chair") || keywordLower.contains("sofa") {
+            basePrice = 150.0
+        } else if keywordLower.contains("kitchen") || keywordLower.contains("appliance") {
+            basePrice = 80.0
+        }
+        // Add some randomness to the base price
+        basePrice *= Double.random(in: 0.9...1.1)
+        
+        // Get a few working image URLs
+        let imageURLs = [
+            "https://placehold.co/200x200/png?text=\(keyword.replacingOccurrences(of: " ", with: "+"))",
+            "https://dummyimage.com/200x200/000/fff&text=\(keyword.replacingOccurrences(of: " ", with: "+"))",
+            "https://picsum.photos/seed/\(keyword.replacingOccurrences(of: " ", with: ""))/200/200",
+            "https://via.placeholder.com/200/444444/FFFFFF/?text=\(keyword.replacingOccurrences(of: " ", with: "+"))"
+        ]
+        
+        // Create mock items
+        var items: [EbayItem] = []
+        var totalPrice: Double = 0
+        var lowestPrice = Double.greatestFiniteMagnitude
+        var highestPrice: Double = 0
+        
+        for i in 1...itemCount {
+            // Create price with some variation, but keep it somewhat realistic
+            let variationFactor = Double.random(in: 0.85...1.15)
+            let condition = ["New", "Used - Like New", "Used - Good", "Used - Fair"].randomElement() ?? "Used"
+            
+            // Used items should be cheaper
+            let conditionFactor = condition.contains("New") ? 1.0 : 
+                                  condition.contains("Like New") ? 0.9 :
+                                  condition.contains("Good") ? 0.8 : 0.7
+            
+            let price = basePrice * variationFactor * conditionFactor
+            
+            // Create better titles
+            let qualifiers = ["Authentic", "Genuine", "Official", "Premium", "Deluxe", "Standard", "Classic"]
+            let qualifier = qualifiers.randomElement() ?? ""
+            let itemSpecific = i % 2 == 0 ? "Model \(2020 + i % 5)" : "Series \(Int.random(in: 1...10))"
+            
+            // Select a random image URL
+            let imageUrl = imageURLs.randomElement() ?? imageURLs[0]
+            
+            // Create mock item
+            let item = EbayItem(
+                title: "\(qualifier) \(keyword) \(itemSpecific) - \(condition)",
+                price: price,
+                imageUrl: imageUrl,
+                condition: condition,
+                soldDate: formatMockSoldDate()
+            )
+            
+            items.append(item)
+            totalPrice += price
+            
+            // Update price ranges
+            lowestPrice = min(lowestPrice, price)
+            highestPrice = max(highestPrice, price)
+        }
+        
+        // Calculate average price
+        let averagePrice = totalPrice / Double(itemCount)
+        
+        // Create mock search result
+        let result = EbaySearchResult(
+            averagePrice: averagePrice,
+            lowestPrice: lowestPrice,
+            highestPrice: highestPrice,
+            itemCount: itemCount,
+            items: items
+        )
+        
+        print("✅ Created \(itemCount) mock results with price range: $\(String(format: "%.2f", lowestPrice)) - $\(String(format: "%.2f", highestPrice))")
+        return .success(result)
+    }
+    
+    private func formatMockSoldDate() -> String {
+        // Generate a random recent date
+        let calendar = Calendar.current
+        if let recentDate = calendar.date(byAdding: .day, value: -Int.random(in: 1...30), to: Date()) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateStyle = .medium
+            displayFormatter.timeStyle = .none
+            return displayFormatter.string(from: recentDate)
+        }
+        return "Recently"
     }
 } 
