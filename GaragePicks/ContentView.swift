@@ -782,15 +782,20 @@ struct ContentView: View {
         // Set loading state for this item
         itemPrices[item] = (isLoading: true, result: nil, error: nil)
         
-        // Clean up the search query - more thorough cleaning
-        let cleanQuery = item
+        // Extract only the product name, removing descriptions
+        let productName = item
+            .split(separator: "-").first?
+            .split(separator: ",").first?
+            .replacingOccurrences(of: "\\(.*\\)", with: "", options: .regularExpression)
             .replacingOccurrences(of: "**", with: "")
             .replacingOccurrences(of: "*", with: "")
-            .replacingOccurrences(of: " - ", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? item.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Store the search query for reference
+        searchQuery = productName
         
         Task {
-            let result = await ebayService.searchCompletedItems(keyword: cleanQuery)
+            let result = await ebayService.searchCompletedItems(keyword: productName)
             
             DispatchQueue.main.async {
                 switch result {
@@ -922,14 +927,19 @@ struct ContentView: View {
         isPriceLoading = true
         
         Task {
-            // Use the same cleanQuery logic as in fetchPriceForItem
-            let cleanQuery = item
+            // Extract only the product name, using the same logic as fetchPriceForItem
+            let productName = item
+                .split(separator: "-").first?
+                .split(separator: ",").first?
+                .replacingOccurrences(of: "\\(.*\\)", with: "", options: .regularExpression)
                 .replacingOccurrences(of: "**", with: "")
                 .replacingOccurrences(of: "*", with: "")
-                .replacingOccurrences(of: " - ", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? item.trimmingCharacters(in: .whitespacesAndNewlines)
                 
-            let result = await ebayService.searchCompletedItems(keyword: cleanQuery, itemLimit: loadedItemLimit)
+            // Update the search query for reference
+            searchQuery = productName
+                
+            let result = await ebayService.searchCompletedItems(keyword: productName, itemLimit: loadedItemLimit)
             
             DispatchQueue.main.async {
                 isPriceLoading = false
