@@ -388,47 +388,39 @@ struct ContentView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
                 
-                // Direct WebView instead of API results
-                Button(action: {
-                    // Open in external web browser instead of Google search
-                    let cleanedTerm = selectedItem
-                        .replacingOccurrences(of: "\"", with: "")
-                        .replacingOccurrences(of: """
- ", with: "")
-                        
- .replacingOccurrences(of:
- """, with: "")
-                        .replacingOccurrences(of: "'", with: "")
-                        .replacingOccurrences(of: "'", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    
-                    let url = createEbayWebUrlForSoldItems(cleanedTerm)
-                    UIApplication.shared.open(url)
-                }) {
-                    HStack {
-                        Image(systemName: "globe")
-                        Text("Open in Web Browser")
+                // Side-by-side buttons
+                HStack(spacing: 16) {
+                    Button(action: {
+                        let cleanedTerm = selectedItem
+                            .replacingOccurrences(of: "\"", with: "")
+                            .replacingOccurrences(of: "'", with: "")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let url = createEbayWebUrlForSoldItems(cleanedTerm)
+                        UIApplication.shared.open(url)
+                    }) {
+                        HStack {
+                            Image(systemName: "globe")
+                            Text("Open in Web Browser")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.green)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-                }
-                .padding(.horizontal)
-                
-                Button(action: {
-                    openEbayWebViewForItem(selectedItem)
-                }) {
-                    HStack {
-                        Image(systemName: "safari")
-                        Text("Open Web View")
+                    Button(action: {
+                        openEbayWebViewForItem(selectedItem)
+                    }) {
+                        HStack {
+                            Image(systemName: "safari")
+                            Text("Open Web View")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
                 }
                 .padding(.horizontal)
                 
