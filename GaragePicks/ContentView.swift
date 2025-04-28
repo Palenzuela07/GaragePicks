@@ -8,6 +8,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import WebKit
 
 struct ContentView: View {
     @State private var selectedImage: UIImage?
@@ -15,11 +16,57 @@ struct ContentView: View {
     @State private var analysisResults: String = ""
     @State private var isAnalyzing: Bool = false
     @State private var identifiedItems: [String] = []
-    @State private var activeTab: Int = 0 // 0 = Image, 1 = Results
+    @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
+    
+    // Pricing-related state
+    @State private var selectedItemForPricing: String? = nil
+    @State private var priceResults: EbaySearchResult? = nil
+    @State private var isPriceLoading: Bool = false
+    @State private var priceError: String? = nil
+    @State private var displayedListingCount: Int = 10 // Initial number of listings to show
+    @State private var isLoadingMore: Bool = false
+    @State private var hasMoreResults: Bool = false
+    @State private var currentPage: Int = 1
+    @State private var isWebViewPresented: Bool = false
+    @State private var webViewURL: URL? = nil
     
     private let ebayService = EbayApiService()
     
     // MARK: - eBay Deep Link Helpers
+    
+    // Helper to create the URL components for a search
+    private func createSearchComponents(for searchTerm: String, page: Int) -> URLComponents {
+        var components = URLComponents(string: "https://api.ebay.com/buy/browse/v1/item_summary/search")!
+        
+        // Offset calculation for pagination (0-based)
+        let offset = (page - 1) * 100
+        
+        // Basic query parameters
+        components.queryItems = [
+            URLQueryItem(name: "q", value: searchTerm),
+            URLQueryItem(name: "limit", value: "100"), // Max results per page
+            URLQueryItem(name: "offset", value: "\(offset)"), // Pagination offset
+            URLQueryItem(name: "fieldgroups", value: "FULL")
+        ]
+        
+        // Filter for completed AND sold items (both are required to match eBay website)
+        components.queryItems?.append(URLQueryItem(name: "filter", value: "itemLocationCountry:US"))
+        components.queryItems?.append(URLQueryItem(name: "filter", value: "buyingOptions:{FIXED_PRICE|AUCTION}"))
+        components.queryItems?.append(URLQueryItem(name: "filter", value: "deliveryCountry:US"))
+        components.queryItems?.append(URLQueryItem(name: "filter", value: "conditionIds:{1000|1500|2000|2500|3000|4000|5000|6000}"))
+        components.queryItems?.append(URLQueryItem(name: "filter", value: "soldItemsOnly:true")) 
+        
+        // Sort by recently sold first (most recent ending date)
+        components.queryItems?.append(URLQueryItem(name: "sort", value: "-endedDate"))
+        
+        return components
+    }
+    
+    // Direct URL for comparison with eBay app
+    private func createEbayWebUrlForSoldItems(_ searchTerm: String) -> URL {
+        let encodedTerm = searchTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return URL(string: "https://www.ebay.com/sch/i.html?_nkw=\(encodedTerm)&LH_Complete=1&LH_Sold=1&_sop=13")!
+    }
     
     // Opens the eBay app with the given search term, falls back to Safari if the app isn't installed
     private func openEbaySearch(for searchTerm: String) {
@@ -32,12 +79,13 @@ struct ContentView: View {
  """, with: "")
             .replacingOccurrences(of: "'", with: "")
             .replacingOccurrences(of: "'", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Create the web URL for eBay (this will always work)
-        let webUrl = URL(string: "https://www.ebay.com/sch/i.html?_nkw=\(cleanedTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Sold=1")!
+        // Create the web URL for eBay with proper sold items filter
+        let webUrl = createEbayWebUrlForSoldItems(cleanedTerm)
         
-        // Try the eBay app URL first
-        if let appUrl = URL(string: "ebay://search?query=\(cleanedTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Sold=1") {
+        // Try the eBay app URL first with sold parameters
+        if let appUrl = URL(string: "ebay://search?query=\(cleanedTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Complete=1&LH_Sold=1") {
             // Check if we can open the eBay app URL
             if UIApplication.shared.canOpenURL(appUrl) {
                 UIApplication.shared.open(appUrl, options: [:]) { success in
@@ -56,7 +104,7 @@ struct ContentView: View {
     
     var body: some View {
         VStack {
-            // Tab buttons at top
+            // Tab buttons at top - add pricing tab
             HStack {
                 TabButton(title: "Image", isActive: activeTab == 0) {
                     activeTab = 0
@@ -65,6 +113,10 @@ struct ContentView: View {
                 TabButton(title: "Analysis", isActive: activeTab == 1) {
                     activeTab = 1
                 }
+                
+                TabButton(title: "Completed & Sold", isActive: activeTab == 2) {
+                    activeTab = 2
+                }
             }
             .padding(.horizontal)
             
@@ -72,18 +124,33 @@ struct ContentView: View {
             ScrollView {
                 if activeTab == 0 {
                     imageTabContent
-                } else {
+                } else if activeTab == 1 {
                     analysisTabContent
+                } else {
+                    pricingTabContent
                 }
             }
         }
         .sheet(isPresented: $isImagePickerPresented) {
             ImagePicker(selectedImage: $selectedImage)
         }
+        .sheet(isPresented: $isWebViewPresented) {
+            if let url = webViewURL {
+                EbayWebView(url: url, onDismiss: {
+                    isWebViewPresented = false 
+                })
+            }
+        }
         .onChange(of: identifiedItems) { _ in
             // When items are identified, switch to the analysis tab
             if !identifiedItems.isEmpty {
                 activeTab = 1
+            }
+        }
+        .onChange(of: isPriceLoading) { isLoading in
+            // When pricing results are loaded, switch to pricing tab
+            if !isLoading && priceResults != nil {
+                activeTab = 2
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -161,7 +228,7 @@ struct ContentView: View {
                     
                     ForEach(identifiedItems, id: \.self) { item in
                         Button(action: {
-                            openEbaySearch(for: item)
+                            openEbayWebViewForItem(item)
                         }) {
                             HStack {
                                 Text(item)
@@ -172,10 +239,10 @@ struct ContentView: View {
                                 
                                 Spacer()
                                 
-                                Image(systemName: "magnifyingglass")
+                                Image(systemName: "tag")
                                     .foregroundColor(.blue)
                                 
-                                Text("Search eBay")
+                                Text("Search Completed & Sold")
                                     .font(.caption)
                                     .foregroundColor(.blue)
                             }
@@ -186,6 +253,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                         .padding(.horizontal)
+                        .padding(.bottom, 8)
                     }
                 }
             }
@@ -198,7 +266,153 @@ struct ContentView: View {
         .padding(.vertical)
     }
     
+    var pricingTabContent: some View {
+        VStack(alignment: .center, spacing: 20) {
+            if let selectedItem = selectedItemForPricing {
+                // Header with item name
+                HStack {
+                    Button(action: {
+                        activeTab = 1 // Go back to analysis tab
+                    }) {
+                        Image(systemName: "arrow.left")
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.trailing, 8)
+                    
+                    Text(selectedItem)
+                        .font(.headline)
+                        .lineLimit(1)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                
+                // Direct WebView instead of API results
+                Button(action: {
+                    // Open in external web browser instead of Google search
+                    let cleanedTerm = selectedItem
+                        .replacingOccurrences(of: "\"", with: "")
+                        .replacingOccurrences(of: """
+ ", with: "")
+                        
+ .replacingOccurrences(of:
+ """, with: "")
+                        .replacingOccurrences(of: "'", with: "")
+                        .replacingOccurrences(of: "'", with: "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    let url = createEbayWebUrlForSoldItems(cleanedTerm)
+                    UIApplication.shared.open(url)
+                }) {
+                    HStack {
+                        Image(systemName: "globe")
+                        Text("Open in Web Browser")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                }
+                .padding(.horizontal)
+                
+                Button(action: {
+                    openEbayWebViewForItem(selectedItem)
+                }) {
+                    HStack {
+                        Image(systemName: "safari")
+                        Text("Open Web View")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                }
+                .padding(.horizontal)
+                
+                Spacer()
+                
+                // Instructions
+                VStack(spacing: 16) {
+                    Image(systemName: "arrow.up.forward.app.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(.gray)
+                    
+                    Text("Tap the button above to see eBay's completed and sold listings for this item.")
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.gray)
+                        .padding()
+                }
+                .frame(maxHeight: .infinity)
+                
+            } else {
+                VStack {
+                    Text("Select an item to check pricing")
+                        .foregroundColor(.gray)
+                        .padding()
+                    
+                    Button(action: {
+                        activeTab = 1
+                    }) {
+                        Text("← Go to Item Selection")
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                    }
+                }
+            }
+        }
+        .padding(.vertical)
+    }
+    
+    // Open eBay WebView for a specific item
+    private func openEbayWebViewForItem(_ item: String) {
+        // Clean the search term
+        let cleanedTerm = item
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: """
+            , with: "")
+            .replacingOccurrences(of:
+ """, with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Set the selected item for the pricing tab
+        selectedItemForPricing = item
+        
+        // Create the eBay URL
+        webViewURL = createEbayWebUrlForSoldItems(cleanedTerm)
+        isWebViewPresented = true
+        activeTab = 2
+    }
+    
     // MARK: - Helper Methods
+    
+    // Load more items from the current results
+    private func loadMoreItems() {
+        // Increase the number of displayed items
+        let newCount = min(displayedListingCount + 10, priceResults?.items.count ?? 0)
+        displayedListingCount = newCount
+    }
+    
+    // Load the next page of results from eBay
+    private func loadNextPage() {
+        guard let selectedItem = selectedItemForPricing, !isLoadingMore else { return }
+        
+        isLoadingMore = true
+        currentPage += 1
+        
+        Task {
+            await fetchMoreResultsForItem(selectedItem, page: currentPage)
+        }
+    }
+    
+    // MARK: - Existing Methods
     
     func analyzePhoto() {
         guard let image = selectedImage else { return }
@@ -377,6 +591,153 @@ struct ContentView: View {
             .prefix(10) // Limit to 10 items
             .map { String($0) }
     }
+    
+    // Fetch price for a single item
+    func fetchPriceForItem(_ item: String) {
+        // Reset pagination state
+        currentPage = 1
+        displayedListingCount = 10
+        hasMoreResults = false
+        
+        // Set loading state and selected item
+        isPriceLoading = true
+        selectedItemForPricing = item
+        priceError = nil
+        
+        // Clean up the search term to be more effective
+        let cleanedTerm = item
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: """
+            , with: "")
+            .replacingOccurrences(of:
+ """, with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        Task {
+            let components = createSearchComponents(for: cleanedTerm, page: 1)
+            
+            // Print the URL for debugging
+            if let url = components.url {
+                print("🔗 API URL: \(url.absoluteString)")
+            }
+            
+            // Use the custom components method
+            let result = await ebayService.searchWithCustomComponents(components, itemLimit: 100)
+            
+            DispatchQueue.main.async {
+                isPriceLoading = false
+                isLoadingMore = false
+                
+                switch result {
+                case .success(let searchResult):
+                    priceResults = searchResult
+                    
+                    // Determine if there might be more results
+                    if searchResult.items.count == 100 {
+                        hasMoreResults = true
+                    }
+                    
+                    print("Found \(searchResult.itemCount) items for \(item) with price range: $\(String(format: "%.2f", searchResult.lowestPrice)) - $\(String(format: "%.2f", searchResult.highestPrice))")
+                    
+                case .failure(let error):
+                    var errorMessage = "No price data available"
+                    
+                    if let ebayError = error as? EbayError {
+                        switch ebayError {
+                        case .noItemsFound:
+                            errorMessage = "No sold items found on eBay"
+                        case .networkError(let message), .parsingError(let message), .authenticationError(let message):
+                            errorMessage = message
+                        case .rateLimitExceeded:
+                            errorMessage = "Too many requests to eBay. Please try again later."
+                        case .httpError(let code):
+                            errorMessage = "Server error (\(code)). Please try again."
+                        case .jsonParsingError(let message):
+                            errorMessage = "Error parsing data: \(message)"
+                        case .invalidSearchTerm:
+                            errorMessage = "Invalid search term. Please try with different keywords."
+                        case .invalidURL:
+                            errorMessage = "Invalid URL configuration."
+                        case .noDataReceived:
+                            errorMessage = "No data received from server."
+                        case .invalidResponse:
+                            errorMessage = "Received invalid response from server."
+                        case .apiError(let message):
+                            errorMessage = "API error: \(message)"
+                        case .noAccessToken:
+                            errorMessage = "Authentication error. Please try again."
+                        }
+                    } else {
+                        errorMessage = error.localizedDescription
+                    }
+                    
+                    priceError = errorMessage
+                    print("eBay search error for \(item): \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    // Load additional pages of results
+    private func fetchMoreResultsForItem(_ item: String, page: Int) async {
+        let cleanedTerm = item
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: """
+            , with: "")
+            .replacingOccurrences(of:
+ """, with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let components = createSearchComponents(for: cleanedTerm, page: page)
+        
+        // Print the URL for debugging
+        if let url = components.url {
+            print("🔗 Loading more results URL: \(url.absoluteString)")
+        }
+        
+        let result = await ebayService.searchWithCustomComponents(components, itemLimit: 100)
+        
+        DispatchQueue.main.async {
+            isLoadingMore = false
+            
+            switch result {
+            case .success(let searchResult):
+                // Update existing results with the new page
+                if let existingResults = priceResults {
+                    // Keep statistics from first page but add new items
+                    var updatedItems = existingResults.items
+                    updatedItems.append(contentsOf: searchResult.items)
+                    
+                    // Create a new result with the combined items
+                    priceResults = EbaySearchResult(
+                        averagePrice: existingResults.averagePrice,
+                        lowestPrice: existingResults.lowestPrice,
+                        highestPrice: existingResults.highestPrice,
+                        itemCount: updatedItems.count,
+                        items: updatedItems
+                    )
+                    
+                    // Update hasMoreResults flag
+                    hasMoreResults = searchResult.items.count == 100
+                    
+                    print("Loaded page \(page) with \(searchResult.items.count) additional items")
+                } else {
+                    // Unlikely case: No existing results but pagination worked
+                    priceResults = searchResult
+                    hasMoreResults = searchResult.items.count == 100
+                }
+                
+            case .failure(let error):
+                // Show error but keep existing results
+                print("Error loading more results: \(error.localizedDescription)")
+                hasMoreResults = false
+            }
+        }
+    }
 }
 
 struct ImagePicker: UIViewControllerRepresentable {
@@ -437,6 +798,147 @@ struct TabButton: View {
                 .foregroundColor(isActive ? .white : .primary)
                 .cornerRadius(8)
         }
+    }
+}
+
+// MARK: - Custom Components
+struct EbayWebView: View {
+    let url: URL
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        NavigationView {
+            WebViewContainer(url: url)
+                .edgesIgnoringSafeArea(.bottom)
+                .navigationBarTitle("eBay Search", displayMode: .inline)
+                .navigationBarItems(trailing: Button("Done") {
+                    onDismiss()
+                })
+        }
+    }
+}
+
+struct WebViewContainer: UIViewRepresentable {
+    let url: URL
+    
+    func makeUIView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.navigationDelegate = context.coordinator
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+    
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        // No updates needed
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, WKNavigationDelegate {
+        let parent: WebViewContainer
+        
+        init(_ parent: WebViewContainer) {
+            self.parent = parent
+        }
+        
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Page loaded successfully
+        }
+        
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            print("WebView navigation failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+struct EbayListingCell: View {
+    let item: EbayItem
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Image of the item
+            ZStack {
+                if let imageUrl = item.imageUrl, let url = URL(string: imageUrl) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                                .frame(width: 80, height: 80)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 80, height: 80)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        case .failure:
+                            Image(systemName: "photo")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 40, height: 40)
+                                .foregroundColor(.gray)
+                                .frame(width: 80, height: 80)
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                } else {
+                    Image(systemName: "photo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 40, height: 40)
+                        .foregroundColor(.gray)
+                        .frame(width: 80, height: 80)
+                }
+            }
+            .background(Color(.systemGray5))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            
+            // Item details
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("$\(String(format: "%.2f", item.price))")
+                        .font(.headline)
+                        .foregroundColor(.green)
+                    
+                    Spacer()
+                    
+                    // Display sold date with more prominence
+                    HStack(spacing: 4) {
+                        Image(systemName: "calendar")
+                            .font(.caption)
+                        Text(item.soldDate ?? "Recently")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(4)
+                }
+                
+                Text(item.title)
+                    .font(.subheadline)
+                    .lineLimit(2)
+                
+                HStack {
+                    Text(item.condition)
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(.systemGray5))
+                        .cornerRadius(4)
+                        
+                    Spacer()
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
+        .padding(.horizontal)
     }
 }
 

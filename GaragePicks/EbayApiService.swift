@@ -655,4 +655,77 @@ class EbayApiService {
             return .failure(EbayError.parsingError(error.localizedDescription))
         }
     }
+    
+    // Search with custom URL components (for advanced filtering)
+    func searchWithCustomComponents(_ components: URLComponents, itemLimit: Int = 50) async -> Result<EbaySearchResult, Error> {
+        print("🔍 Searching with custom components and limit \(itemLimit)")
+        
+        // Check if token is valid, if not refresh it
+        if !isTokenValid() {
+            let tokenResult = await refreshToken()
+            switch tokenResult {
+            case .success:
+                print("✅ Token refreshed successfully")
+            case .failure(let error):
+                print("❌ Failed to refresh token: \(error.localizedDescription)")
+                return .failure(error)
+            }
+        }
+        
+        guard let accessToken = self.authToken else {
+            print("❌ No access token available")
+            return .failure(EbayError.noAccessToken)
+        }
+        
+        guard let url = components.url else {
+            print("❌ Failed to create URL from components")
+            return .failure(EbayError.invalidURL)
+        }
+        
+        print("🔗 API URL: \(url.absoluteString)")
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        // According to documentation, must specify marketplace ID
+        request.addValue("EBAY_US", forHTTPHeaderField: "X-EBAY-C-MARKETPLACE-ID")
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ Invalid response type")
+                return .failure(EbayError.invalidResponse)
+            }
+            
+            print("🌐 API Response Code: \(httpResponse.statusCode)")
+            
+            // Log a sample of the response for debugging
+            if let jsonString = String(data: data, encoding: .utf8) {
+                let maxLength = min(500, jsonString.count)
+                let previewString = String(jsonString.prefix(maxLength))
+                print("📦 Response preview: \(previewString)...")
+            }
+            
+            if httpResponse.statusCode == 200 {
+                // Parse the response with proper price calculations
+                return parseSearchResponse(data: data)
+            } else if httpResponse.statusCode == 429 {
+                print("⚠️ Rate limit exceeded")
+                if let errorText = String(data: data, encoding: .utf8) {
+                    print("❌ API Error: \(errorText)")
+                }
+                return .failure(EbayError.rateLimitExceeded)
+            } else {
+                if let errorText = String(data: data, encoding: .utf8) {
+                    print("❌ API Error: \(errorText)")
+                }
+                return .failure(EbayError.httpError(httpResponse.statusCode))
+            }
+        } catch {
+            print("❌ Network Error: \(error.localizedDescription)")
+            return .failure(error)
+        }
+    }
 } 
