@@ -136,44 +136,6 @@ struct ContentView: View {
                         pricingTabContent
                     }
                 }
-                if activeTab == 0 {
-                    HStack(spacing: 20) {
-                        Button(action: {
-                            isCameraPresented = true
-                        }) {
-                            HStack {
-                                Image(systemName: "camera")
-                                    .font(.title2)
-                                Text("Take or Choose Photo")
-                                    .font(.headline)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(12)
-                        }
-                        
-                        Button(action: {
-                            analyzePhoto()
-                        }) {
-                            HStack {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.title2)
-                                Text(isAnalyzing ? "Analyzing..." : "Analyze")
-                                    .font(.headline)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(selectedImage == nil ? Color.gray : Color.green)
-                            .foregroundColor(.white)
-                            .cornerRadius(12)
-                        }
-                        .disabled(selectedImage == nil || isAnalyzing)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 24)
-                }
             }
         }
         .sheet(isPresented: $isImagePickerPresented) {
@@ -209,14 +171,15 @@ struct ContentView: View {
     // MARK: - Tab Content Views
     
     var imageTabContent: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        VStack(spacing: 24) {
+            Spacer(minLength: 40)
             if let image = selectedImage {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(height: 300)
+                    .frame(maxHeight: 420)
                     .cornerRadius(10)
+                    .padding(.horizontal, 8)
             } else {
                 Image(systemName: "photo")
                     .imageScale(.large)
@@ -224,6 +187,36 @@ struct ContentView: View {
                     .foregroundColor(.gray)
                     .frame(height: 300)
             }
+            HStack(spacing: 20) {
+                Button(action: {
+                    isCameraPresented = true
+                }) {
+                    Image(systemName: "camera")
+                        .font(.title2)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                }
+                Button(action: {
+                    analyzePhoto()
+                }) {
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .font(.title2)
+                        Text(isAnalyzing ? "Analyzing..." : "Analyze")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(selectedImage == nil ? Color.gray : Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                }
+                .disabled(selectedImage == nil || isAnalyzing)
+            }
+            .padding(.horizontal)
             Spacer()
         }
         .frame(maxHeight: .infinity)
