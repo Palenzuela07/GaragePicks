@@ -262,15 +262,30 @@ struct ContentView: View {
     
     var analysisTabContent: some View {
         VStack(spacing: 16) {
-            // Show the selected image at the top
+            // Show selected photos at the top
             if !selectedImages.isEmpty {
-                Image(uiImage: selectedImages[0])
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 220)
-                    .cornerRadius(10)
-                    .padding(.horizontal, 8)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(selectedImages, id: \.self) { image in
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 100, height: 100)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                                )
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .frame(height: 120)
+                .background(Color(.systemGray6).opacity(0.3))
+                .cornerRadius(12)
+                .padding(.horizontal)
             }
+            
             // Show price stats if available
             if let priceResults = priceResults {
                 HStack(spacing: 24) {
@@ -551,7 +566,7 @@ struct ContentView: View {
         var messages: [[String: Any]] = [
             [
                 "role": "system",
-                "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. You will receive multiple images. Analyze ALL images together and provide a single comprehensive list of all products found across all images. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of ALL identified items from ALL images. Do not separate items by image - combine them into one unified list."
+                "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. You will receive multiple images. Analyze ALL images together and provide a single comprehensive list of all products found across all images. ONLY list the specific product names that could be searched on eBay. DO NOT include any additional descriptions, references, or context. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of ONLY the product names. Do not include phrases like 'visible in cart', 'shown in image', or any other descriptive text - just the product names themselves."
             ]
         ]
         
@@ -559,7 +574,7 @@ struct ContentView: View {
         var content: [[String: Any]] = [
             [
                 "type": "text",
-                "text": "Here are multiple images. Please analyze ALL of them together and provide a single comprehensive list of all products found across these images. List them specifically by name as they would appear in an eBay search."
+                "text": "Here are multiple images. Please analyze ALL of them together and provide a single comprehensive list of ONLY the product names found across these images. List ONLY the specific product names as they would appear in an eBay search. Do not include any additional descriptions or context."
             ]
         ]
         
