@@ -16,7 +16,7 @@ import UIKit
 #endif
 
 struct ContentView: View {
-    @State private var selectedImage: UIImage?
+    @State private var selectedImages: [UIImage] = []
     @State private var isImagePickerPresented = false
     @State private var isCameraPresented = false
     @State private var analysisResults: String = ""
@@ -142,10 +142,10 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $isImagePickerPresented) {
-            ImagePicker(selectedImage: $selectedImage, sourceType: .photoLibrary)
+            ImagePicker(selectedImages: $selectedImages, sourceType: .photoLibrary)
         }
         .fullScreenCover(isPresented: $isCameraPresented) {
-            CameraView(selectedImage: $selectedImage)
+            CameraView(selectedImages: $selectedImages)
         }
         .sheet(isPresented: $isWebViewPresented) {
             if let url = webViewURL {
@@ -182,31 +182,54 @@ struct ContentView: View {
     var imageTabContent: some View {
         VStack(spacing: 24) {
             Spacer(minLength: 40)
-            if let image = selectedImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 420)
-                    .cornerRadius(10)
-                    .padding(.horizontal, 8)
+            if !selectedImages.isEmpty {
+                ScrollView {
+                    let columns = [GridItem(.flexible()), GridItem(.flexible())]
+                    LazyVGrid(columns: columns, spacing: 16) {
+                        ForEach(selectedImages, id: \.self) { image in
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(height: 200)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                                )
+                                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                }
             } else {
-                Image(systemName: "photo")
-                    .imageScale(.large)
-                    .font(.system(size: 100))
-                    .foregroundColor(.gray)
-                    .frame(height: 300)
+                VStack(spacing: 16) {
+                    Image(systemName: "photo")
+                        .imageScale(.large)
+                        .font(.system(size: 100))
+                        .foregroundColor(.gray)
+                        .frame(height: 200)
+                    
+                    Text("No photos selected")
+                        .foregroundColor(.gray)
+                        .font(.headline)
+                }
             }
             HStack(spacing: 20) {
                 Button(action: {
                     isCameraPresented = true
                 }) {
-                    Image(systemName: "camera")
-                        .font(.title2)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
+                    HStack {
+                        Image(systemName: "camera")
+                            .font(.title2)
+                        Text("Take Photo")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
                 }
                 Button(action: {
                     analyzePhoto()
@@ -219,11 +242,11 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(selectedImage == nil ? Color.gray : Color.green)
+                    .background(selectedImages.isEmpty ? Color.gray : Color.green)
                     .foregroundColor(.white)
                     .cornerRadius(12)
                 }
-                .disabled(selectedImage == nil || isAnalyzing)
+                .disabled(selectedImages.isEmpty || isAnalyzing)
             }
             .padding(.horizontal)
             Spacer()
@@ -234,8 +257,8 @@ struct ContentView: View {
     var analysisTabContent: some View {
         VStack(spacing: 16) {
             // Show the selected image at the top
-            if let image = selectedImage {
-                Image(uiImage: image)
+            if !selectedImages.isEmpty {
+                Image(uiImage: selectedImages[0])
                     .resizable()
                     .scaledToFit()
                     .frame(maxHeight: 220)
@@ -499,11 +522,14 @@ struct ContentView: View {
     // MARK: - Existing Methods
     
     func analyzePhoto() {
-        guard let image = selectedImage else { return }
+        guard !selectedImages.isEmpty else { return }
         
         isAnalyzing = true
-        analysisResults = "Analyzing image with ChatGPT..."
+        analysisResults = "Analyzing images with ChatGPT..."
         identifiedItems = []
+        
+        // For now, we'll analyze the first image
+        let image = selectedImages[0]
         
         // Convert UIImage to base64 string
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
@@ -908,7 +934,7 @@ struct ContentView: View {
 }
 
 struct ImagePicker: UIViewControllerRepresentable {
-    @Binding var selectedImage: UIImage?
+    @Binding var selectedImages: [UIImage]
     @Environment(\.presentationMode) var presentationMode
     let sourceType: UIImagePickerController.SourceType
     
@@ -942,7 +968,7 @@ struct ImagePicker: UIViewControllerRepresentable {
         
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
             if let image = info[.originalImage] as? UIImage {
-                parent.selectedImage = image
+                parent.selectedImages.append(image)
             }
             parent.presentationMode.wrappedValue.dismiss()
         }
@@ -959,7 +985,7 @@ struct ImagePicker: UIViewControllerRepresentable {
             if provider.canLoadObject(ofClass: UIImage.self) {
                 provider.loadObject(ofClass: UIImage.self) { image, error in
                     DispatchQueue.main.async {
-                        self.parent.selectedImage = image as? UIImage
+                        self.parent.selectedImages.append(image as? UIImage ?? UIImage())
                     }
                 }
             }

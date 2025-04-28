@@ -6,7 +6,7 @@ import UIKit
 #endif
 
 struct CameraView: View {
-    @Binding var selectedImage: UIImage?
+    @Binding var selectedImages: [UIImage]
     @Environment(\.presentationMode) var presentationMode
     @State private var isCameraAuthorized = false
     @State private var isPhotoLibraryAuthorized = false
@@ -14,9 +14,12 @@ struct CameraView: View {
     @State private var cameraSession: AVCaptureSession?
     @State private var cameraPreview: AVCaptureVideoPreviewLayer?
     @State private var selectedPhotos: [UIImage] = []
-    @State private var selectedLibraryPhoto: UIImage? = nil
+    @State private var selectedLibraryPhotos: [UIImage] = []
     @State private var selectedPhotoAssets: [PHAsset] = []
-    @State private var selectedLibraryAsset: PHAsset? = nil
+    @State private var selectedLibraryAssets: Set<PHAsset> = []
+    @State private var photoOutput: AVCapturePhotoOutput?
+    @State private var libraryPhotos: [UIImage] = []
+    @State private var libraryAssets: [PHAsset] = []
     
     var body: some View {
         GeometryReader { geometry in
@@ -43,17 +46,15 @@ struct CameraView: View {
                                     .padding()
                             }
                             Spacer()
-                            if selectedLibraryPhoto != nil {
+                            if !selectedPhotos.isEmpty || !selectedLibraryPhotos.isEmpty {
                                 Button(action: {
-                                    if let selected = selectedLibraryPhoto {
-                                        selectedImage = selected
-                                        presentationMode.wrappedValue.dismiss()
-                                    }
+                                    selectedImages = selectedPhotos + selectedLibraryPhotos
+                                    presentationMode.wrappedValue.dismiss()
                                 }) {
                                     HStack(spacing: 4) {
-                                        Text("Next")
+                                        Text("Done")
                                             .font(.headline)
-                                        Image(systemName: "arrow.right.circle.fill")
+                                        Image(systemName: "checkmark.circle.fill")
                                             .foregroundColor(.blue)
                                     }
                                     .padding(.horizontal, 12)
@@ -112,7 +113,7 @@ struct CameraView: View {
                     let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(Array(selectedPhotos.enumerated()), id: \.offset) { idx, image in
+                            ForEach(Array(libraryPhotos.enumerated()), id: \.offset) { idx, image in
                                 ZStack(alignment: .topTrailing) {
                                     Image(uiImage: image)
                                         .resizable()
@@ -121,14 +122,13 @@ struct CameraView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                                .stroke(selectedLibraryAsset == selectedPhotoAssets[idx] ? Color.blue : Color.clear, lineWidth: 4)
+                                                .stroke(selectedLibraryAssets.contains(libraryAssets[idx]) ? Color.blue : Color.clear, lineWidth: 4)
                                         )
-                                        .shadow(color: selectedLibraryAsset == selectedPhotoAssets[idx] ? Color.blue.opacity(0.2) : Color.black.opacity(0.1), radius: 8, y: 2)
+                                        .shadow(color: selectedLibraryAssets.contains(libraryAssets[idx]) ? Color.blue.opacity(0.2) : Color.black.opacity(0.1), radius: 8, y: 2)
                                         .onTapGesture {
-                                            fetchFullSizeImage(for: selectedPhotoAssets[idx])
-                                            selectedLibraryAsset = selectedPhotoAssets[idx]
+                                            toggleAssetSelection(libraryAssets[idx])
                                         }
-                                    if selectedLibraryAsset == selectedPhotoAssets[idx] {
+                                    if selectedLibraryAssets.contains(libraryAssets[idx]) {
                                         Circle()
                                             .fill(Color.blue)
                                             .frame(width: 28, height: 28)
@@ -207,6 +207,12 @@ struct CameraView: View {
             session.addInput(input)
         }
         
+        let output = AVCapturePhotoOutput()
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+            photoOutput = output
+        }
+        
         let preview = AVCaptureVideoPreviewLayer(session: session)
         preview.videoGravity = .resizeAspectFill
         
@@ -219,7 +225,24 @@ struct CameraView: View {
     }
     
     private func capturePhoto() {
-        // Implement photo capture
+        guard let output = photoOutput else { return }
+        
+        let settings = AVCapturePhotoSettings()
+        output.capturePhoto(with: settings, delegate: PhotoCaptureDelegate { image in
+            if let image = image {
+                DispatchQueue.main.async {
+                    selectedPhotos.append(image)
+                    // Create a PHAsset for the captured photo
+                    let fetchOptions = PHFetchOptions()
+                    fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+                    fetchOptions.fetchLimit = 1
+                    
+                    if let asset = PHAsset.fetchAssets(with: .image, options: fetchOptions).firstObject {
+                        selectedPhotoAssets.append(asset)
+                    }
+                }
+            }
+        })
     }
     
     private func loadPhotos() {
@@ -243,8 +266,8 @@ struct CameraView: View {
                         tempImages.append(image)
                         tempAssets.append(asset)
                         if tempImages.count == fetchResult.count {
-                            selectedPhotos = tempImages
-                            selectedPhotoAssets = tempAssets
+                            libraryPhotos = tempImages
+                            libraryAssets = tempAssets
                         }
                     }
                 }
@@ -252,23 +275,55 @@ struct CameraView: View {
         }
     }
     
+    private func toggleAssetSelection(_ asset: PHAsset) {
+        if selectedLibraryAssets.contains(asset) {
+            selectedLibraryAssets.remove(asset)
+            if let index = selectedLibraryPhotos.firstIndex(where: { _ in true }) {
+                selectedLibraryPhotos.remove(at: index)
+            }
+        } else {
+            selectedLibraryAssets.insert(asset)
+            fetchFullSizeImage(for: asset)
+        }
+    }
+    
     private func fetchFullSizeImage(for asset: PHAsset) {
-        let imageManager = PHImageManager.default()
+        let manager = PHImageManager.default()
         let options = PHImageRequestOptions()
-        options.isSynchronous = false
         options.deliveryMode = .highQualityFormat
-        options.resizeMode = .none
-        options.isNetworkAccessAllowed = true
-        let targetSize = CGSize(width: asset.pixelWidth, height: asset.pixelHeight)
-        imageManager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { image, _ in
+        options.isSynchronous = false
+        
+        manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: options) { image, _ in
             if let image = image {
                 DispatchQueue.main.async {
-                    selectedLibraryPhoto = image
-                    selectedImage = image
-                    selectedLibraryAsset = asset
+                    selectedLibraryPhotos.append(image)
                 }
             }
         }
+    }
+}
+
+class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
+    private let completion: (UIImage?) -> Void
+    
+    init(completion: @escaping (UIImage?) -> Void) {
+        self.completion = completion
+    }
+    
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if let error = error {
+            print("Error capturing photo: \(error.localizedDescription)")
+            completion(nil)
+            return
+        }
+        
+        guard let imageData = photo.fileDataRepresentation(),
+              let image = UIImage(data: imageData) else {
+            completion(nil)
+            return
+        }
+        
+        completion(image)
     }
 }
 
@@ -292,4 +347,11 @@ struct VisualEffectBlur: UIViewRepresentable {
         return UIVisualEffectView(effect: UIBlurEffect(style: blurStyle))
     }
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
+}
+
+// Helper extension for safe array access
+extension Array {
+    subscript(safe index: Index) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
 } 
