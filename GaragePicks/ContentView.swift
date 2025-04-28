@@ -65,7 +65,8 @@ struct ContentView: View {
     // Direct URL for comparison with eBay app
     private func createEbayWebUrlForSoldItems(_ searchTerm: String) -> URL {
         let encodedTerm = searchTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return URL(string: "https://www.ebay.com/sch/i.html?_nkw=\(encodedTerm)&LH_Complete=1&LH_Sold=1&_sop=13")!
+        return URL(string: "https://www.ebay.com/sch/i.html?_nkw=\(encodedTerm)&LH_Complete=1&LH_Sold=1&_sop=10")!
+        // _sop=10 is for "Newly Listed" items
     }
     
     // Opens the eBay app with the given search term, falls back to Safari if the app isn't installed
