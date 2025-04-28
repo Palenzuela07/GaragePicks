@@ -185,7 +185,7 @@ struct ContentView: View {
             if !selectedImages.isEmpty {
                 ScrollView {
                     let columns = [GridItem(.flexible()), GridItem(.flexible())]
-                    LazyVGrid(columns: columns, spacing: 16) {
+                    LazyVGrid(columns: columns, spacing: 20) {
                         ForEach(selectedImages, id: \.self) { image in
                             Image(uiImage: image)
                                 .resizable()
@@ -199,9 +199,12 @@ struct ContentView: View {
                                 .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                         }
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
+                .background(Color(.systemGray6).opacity(0.3))
+                .cornerRadius(16)
+                .padding(.horizontal)
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "photo")
@@ -215,6 +218,9 @@ struct ContentView: View {
                         .font(.headline)
                 }
             }
+            
+            Spacer()
+            
             HStack(spacing: 20) {
                 Button(action: {
                     isCameraPresented = true
@@ -249,7 +255,7 @@ struct ContentView: View {
                 .disabled(selectedImages.isEmpty || isAnalyzing)
             }
             .padding(.horizontal)
-            Spacer()
+            .padding(.bottom, 20)
         }
         .frame(maxHeight: .infinity)
     }
@@ -528,44 +534,50 @@ struct ContentView: View {
         analysisResults = "Analyzing images with ChatGPT..."
         identifiedItems = []
         
-        // For now, we'll analyze the first image
-        let image = selectedImages[0]
-        
-        // Convert UIImage to base64 string
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            analysisResults = "Error: Could not convert image to data"
-            isAnalyzing = false
-            return
+        // Convert all selected images to base64 strings
+        var base64Images: [String] = []
+        for image in selectedImages {
+            if let imageData = image.jpegData(compressionQuality: 0.8) {
+                let base64Image = imageData.base64EncodedString()
+                base64Images.append(base64Image)
+            }
         }
-        
-        let base64Image = imageData.base64EncodedString()
         
         // Prepare the ChatGPT API request
         let apiKey = "YOUR_OPENAI_API_KEY"
         let url = URL(string: "https://api.openai.com/v1/chat/completions")!
         
-        // Create the request body
-        let messages: [[String: Any]] = [
+        // Create the request body with multiple images
+        var messages: [[String: Any]] = [
             [
                 "role": "system",
-                "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. Identify all products in the image, listing the specific product names that could be searched on eBay. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of identified items."
-            ],
-            [
-                "role": "user",
-                "content": [
-                    [
-                        "type": "text",
-                        "text": "Identify all products in this image. List them specifically by name as they would appear in an eBay search."
-                    ],
-                    [
-                        "type": "image_url",
-                        "image_url": [
-                            "url": "data:image/jpeg;base64,\(base64Image)"
-                        ]
-                    ]
-                ]
+                "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. You will receive multiple images. Analyze ALL images together and provide a single comprehensive list of all products found across all images. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of ALL identified items from ALL images. Do not separate items by image - combine them into one unified list."
             ]
         ]
+        
+        // Create a single user message with all images
+        var content: [[String: Any]] = [
+            [
+                "type": "text",
+                "text": "Here are multiple images. Please analyze ALL of them together and provide a single comprehensive list of all products found across these images. List them specifically by name as they would appear in an eBay search."
+            ]
+        ]
+        
+        // Add all images to the content array
+        for base64Image in base64Images {
+            content.append([
+                "type": "image_url",
+                "image_url": [
+                    "url": "data:image/jpeg;base64,\(base64Image)"
+                ]
+            ])
+        }
+        
+        // Add the combined message to the messages array
+        messages.append([
+            "role": "user",
+            "content": content
+        ])
         
         let requestBody: [String: Any] = [
             "model": "gpt-4o",
