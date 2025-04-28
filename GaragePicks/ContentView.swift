@@ -7,6 +7,7 @@
 
 import SwiftUI
 import PhotosUI
+import UIKit
 
 struct ContentView: View {
     @State private var selectedImage: UIImage?
@@ -14,50 +15,43 @@ struct ContentView: View {
     @State private var analysisResults: String = ""
     @State private var isAnalyzing: Bool = false
     @State private var identifiedItems: [String] = []
-    @State private var selectedItemForPricing: String? = nil
-    @State private var priceResults: EbaySearchResult? = nil
-    @State private var isPriceLoading: Bool = false
-    @State private var priceError: String? = nil
-    @State private var searchQuery: String? = nil
-    @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
-    @State private var itemPrices: [String: (isLoading: Bool, result: EbaySearchResult?, error: String?)] = [:]
-    @State private var displayedListingCount: Int = 5 // Number of listings to display initially
-    @State private var loadedItemLimit: Int = 25 // Default number of eBay results to load
+    @State private var activeTab: Int = 0 // 0 = Image, 1 = Results
     
     private let ebayService = EbayApiService()
     
-    // Computed property for sorted items by average price (highest to lowest)
-    private var sortedItemsByPrice: [String] {
-        // Create a list of tuples with (item, price) for sorting
-        let itemsWithPrices = identifiedItems.map { item -> (String, Double) in
-            if let priceData = itemPrices[item], let result = priceData.result {
-                return (item, result.averagePrice)
-            } else {
-                return (item, -1) // -1 for items without price data yet
+    // MARK: - eBay Deep Link Helpers
+    
+    // Opens the eBay app with the given search term, falls back to Safari if the app isn't installed
+    private func openEbaySearch(for searchTerm: String) {
+        // Clean the search term by removing quotation marks
+        let cleanedTerm = searchTerm
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: """
+            , with: "")
+            .replacingOccurrences(of:
+ """, with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "'", with: "")
+        
+        // Create the web URL for eBay (this will always work)
+        let webUrl = URL(string: "https://www.ebay.com/sch/i.html?_nkw=\(cleanedTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Sold=1")!
+        
+        // Try the eBay app URL first
+        if let appUrl = URL(string: "ebay://search?query=\(cleanedTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Sold=1") {
+            // Check if we can open the eBay app URL
+            if UIApplication.shared.canOpenURL(appUrl) {
+                UIApplication.shared.open(appUrl, options: [:]) { success in
+                    // If opening the app URL fails, fall back to web
+                    if !success {
+                        UIApplication.shared.open(webUrl)
+                    }
+                }
+                return
             }
         }
         
-        // Sort items by price (highest first), with unpriced items at the end
-        let sortedItems = itemsWithPrices.sorted { item1, item2 in
-            // If both have valid prices, compare them
-            if item1.1 >= 0 && item2.1 >= 0 {
-                return item1.1 > item2.1 // Descending order
-            }
-            // If only one has a valid price, prioritize it
-            else if item1.1 >= 0 {
-                return true
-            }
-            else if item2.1 >= 0 {
-                return false
-            }
-            // If neither has a price, keep original order
-            else {
-                return identifiedItems.firstIndex(of: item1.0)! < identifiedItems.firstIndex(of: item2.0)!
-            }
-        }
-        
-        // Return just the item names
-        return sortedItems.map { $0.0 }
+        // Fall back to web URL if app URL isn't available or can't be opened
+        UIApplication.shared.open(webUrl)
     }
     
     var body: some View {
@@ -71,10 +65,6 @@ struct ContentView: View {
                 TabButton(title: "Analysis", isActive: activeTab == 1) {
                     activeTab = 1
                 }
-                
-                TabButton(title: "Pricing", isActive: activeTab == 2) {
-                    activeTab = 2
-                }
             }
             .padding(.horizontal)
             
@@ -82,10 +72,8 @@ struct ContentView: View {
             ScrollView {
                 if activeTab == 0 {
                     imageTabContent
-                } else if activeTab == 1 {
-                    analysisTabContent
                 } else {
-                    pricingTabContent
+                    analysisTabContent
                 }
             }
         }
@@ -96,12 +84,6 @@ struct ContentView: View {
             // When items are identified, switch to the analysis tab
             if !identifiedItems.isEmpty {
                 activeTab = 1
-            }
-        }
-        .onChange(of: isPriceLoading) { isLoading in
-            // When pricing results are loaded, switch to pricing tab
-            if !isLoading && priceResults != nil {
-                activeTab = 2
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -173,157 +155,36 @@ struct ContentView: View {
             
             if !identifiedItems.isEmpty {
                 VStack(alignment: .leading) {
-                    Text("Identified Items:")
+                    Text("Identified Items (tap to search eBay):")
                         .font(.headline)
                         .padding(.horizontal)
                     
-                    ForEach(sortedItemsByPrice, id: \.self) { item in
-                        VStack(alignment: .leading, spacing: 4) {
+                    ForEach(identifiedItems, id: \.self) { item in
+                        Button(action: {
+                            openEbaySearch(for: item)
+                        }) {
                             HStack {
                                 Text(item)
                                     .lineLimit(2)
                                     .font(.headline)
+                                    .foregroundColor(.primary)
+                                    .multilineTextAlignment(.leading)
+                                
                                 Spacer()
+                                
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundColor(.blue)
+                                
+                                Text("Search eBay")
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
                             }
-                            
-                            if let itemData = itemPrices[item] {
-                                if itemData.isLoading {
-                                    HStack {
-                                        Spacer()
-                                        ProgressView("Loading prices...")
-                                            .font(.caption)
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 4)
-                                } else if let result = itemData.result {
-                                    HStack(alignment: .top) {
-                                        // Price info
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Average: $\(String(format: "%.2f", result.averagePrice))")
-                                                .fontWeight(.bold)
-                                            HStack {
-                                                Text("Low: $\(String(format: "%.2f", result.lowestPrice))")
-                                                Spacer()
-                                                Text("High: $\(String(format: "%.2f", result.highestPrice))")
-                                            }
-                                            .font(.caption)
-                                            Text("Based on \(result.itemCount) sales")
-                                                .font(.caption)
-                                                .foregroundColor(.gray)
-                                            
-                                            // Add similarity/confidence indicator
-                                            let confidence = calculateConfidence(item: item, results: result)
-                                            HStack {
-                                                Text("Match confidence:")
-                                                    .font(.caption2)
-                                                    .foregroundColor(.gray)
-                                                ConfidenceIndicator(level: confidence)
-                                            }
-                                            .padding(.top, 2)
-                                        }
-                                        
-                                        Spacer()
-                                        
-                                        // Thumbnail image (if available)
-                                        if let firstItem = result.items.first, let imageUrl = firstItem.imageUrl, let url = URL(string: imageUrl) {
-                                            AsyncImage(url: url) { phase in
-                                                switch phase {
-                                                case .empty:
-                                                    ProgressView()
-                                                        .frame(width: 50, height: 50)
-                                                case .success(let image):
-                                                    image
-                                                        .resizable()
-                                                        .aspectRatio(contentMode: .fill)
-                                                        .frame(width: 50, height: 50)
-                                                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                                                case .failure:
-                                                    EmptyView()
-                                                @unknown default:
-                                                    EmptyView()
-                                                }
-                                            }
-                                            .frame(width: 50, height: 50)
-                                            .background(Color(.systemGray5))
-                                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                                        }
-                                    }
-                                    .padding(.vertical, 4)
-                                    
-                                    // Show best matching item details
-                                    if let bestMatch = result.items.first {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("Best match:")
-                                                .font(.caption)
-                                                .foregroundColor(.gray)
-                                            Text(bestMatch.title)
-                                                .font(.caption)
-                                                .lineLimit(2)
-                                                .padding(.bottom, 2)
-                                            
-                                            if !bestMatch.condition.isEmpty {
-                                                Text("Condition: \(bestMatch.condition)")
-                                                    .font(.caption2)
-                                                    .foregroundColor(.gray)
-                                            }
-                                        }
-                                        .padding(.vertical, 2)
-                                    }
-                                    
-                                    Button(action: {
-                                        selectedItemForPricing = item
-                                        priceResults = result
-                                        displayedListingCount = 5 // Reset to initial count when changing items
-                                        activeTab = 2 // Go to pricing tab
-                                    }) {
-                                        Text("View Details")
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.blue)
-                                            .foregroundColor(.white)
-                                            .cornerRadius(8)
-                                            .font(.caption)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                                } else if let error = itemData.error {
-                                    HStack {
-                                        Text("⚠️ \(error)")
-                                            .font(.caption)
-                                            .foregroundColor(.red)
-                                        Spacer()
-                                        Button(action: {
-                                            fetchPriceForItem(item)
-                                        }) {
-                                            Text("Retry")
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(Color.blue)
-                                                .foregroundColor(.white)
-                                                .cornerRadius(8)
-                                                .font(.caption)
-                                        }
-                                    }
-                                }
-                            } else {
-                                HStack {
-                                    Spacer()
-                                    Button(action: {
-                                        fetchPriceForItem(item)
-                                    }) {
-                                        Text("Check Price")
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.blue)
-                                            .foregroundColor(.white)
-                                            .cornerRadius(8)
-                                    }
-                                }
-                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(8)
                         }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                        .buttonStyle(PlainButtonStyle())
                         .padding(.horizontal)
                     }
                 }
@@ -335,261 +196,6 @@ struct ContentView: View {
             }
         }
         .padding(.vertical)
-    }
-    
-    var pricingTabContent: some View {
-        VStack(spacing: 16) {
-            if let priceResults = priceResults, let selectedItem = selectedItemForPricing {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Price Results for: \(selectedItem)")
-                        .font(.headline)
-                    
-                    if let query = searchQuery {
-                        Text("Search terms: \(query)")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                    
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text("Average Price: $\(String(format: "%.2f", priceResults.averagePrice))")
-                                .font(.title3)
-                                .fontWeight(.bold)
-                            
-                            HStack {
-                                Text("Low: $\(String(format: "%.2f", priceResults.lowestPrice))")
-                                Spacer()
-                                Text("High: $\(String(format: "%.2f", priceResults.highestPrice))")
-                            }
-                            .font(.subheadline)
-                            
-                            Text("Based on \(priceResults.itemCount) sold listings")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                                .padding(.top, 2)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(10)
-                    
-                    if !priceResults.items.isEmpty {
-                        Text("Recent Sales:")
-                            .font(.headline)
-                            .padding(.top, 12)
-                        
-                        ForEach(priceResults.items.prefix(displayedListingCount), id: \.title) { item in
-                            HStack(alignment: .top, spacing: 12) {
-                                // Image of the item
-                                ZStack {
-                                    if let imageUrl = item.imageUrl, let url = URL(string: imageUrl) {
-                                        AsyncImage(url: url) { phase in
-                                            switch phase {
-                                            case .empty:
-                                                ProgressView()
-                                                    .frame(width: 80, height: 80)
-                                            case .success(let image):
-                                                image
-                                                    .resizable()
-                                                    .aspectRatio(contentMode: .fill)
-                                                    .frame(width: 80, height: 80)
-                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            case .failure:
-                                                Image(systemName: "photo")
-                                                    .resizable()
-                                                    .aspectRatio(contentMode: .fit)
-                                                    .frame(width: 40, height: 40)
-                                                    .foregroundColor(.gray)
-                                                    .frame(width: 80, height: 80)
-                                            @unknown default:
-                                                EmptyView()
-                                            }
-                                        }
-                                    } else {
-                                        Image(systemName: "photo")
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fit)
-                                            .frame(width: 40, height: 40)
-                                            .foregroundColor(.gray)
-                                            .frame(width: 80, height: 80)
-                                    }
-                                }
-                                .background(Color(.systemGray5))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                
-                                // Item details
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text("$\(String(format: "%.2f", item.price))")
-                                            .font(.headline)
-                                            .foregroundColor(.green)
-                                        
-                                        Spacer()
-                                        
-                                        // Always display sold date with more prominence
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "calendar")
-                                                .font(.caption)
-                                            Text(item.soldDate ?? "Recently")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color(.systemGray6))
-                                        .cornerRadius(4)
-                                    }
-                                    
-                                    Text(item.title)
-                                        .font(.subheadline)
-                                        .lineLimit(2)
-                                    
-                                    HStack {
-                                        Text(item.condition)
-                                            .font(.caption)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color(.systemGray5))
-                                            .cornerRadius(4)
-                                            
-                                        Spacer()
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .padding()
-                            .background(Color(.systemGray6))
-                            .cornerRadius(10)
-                            .padding(.vertical, 4)
-                        }
-                        
-                        // "Load More" button
-                        if priceResults.items.count > displayedListingCount {
-                            Button(action: {
-                                // Increase displayed items count (with a reasonable maximum)
-                                displayedListingCount = min(displayedListingCount + 5, priceResults.items.count)
-                            }) {
-                                HStack {
-                                    Text("Load More Results")
-                                    Image(systemName: "arrow.down.circle.fill")
-                                }
-                                .padding(.vertical, 12)
-                                .padding(.horizontal, 24)
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 8)
-                        }
-                        
-                        // "Load More from eBay" button (only if we're displaying all current results)
-                        if displayedListingCount >= priceResults.items.count && loadedItemLimit < 200 {
-                            Button(action: {
-                                // Load more items from eBay API
-                                fetchMoreEbayResults()
-                            }) {
-                                HStack {
-                                    Text("Search for More on eBay")
-                                    Image(systemName: "magnifyingglass.circle.fill")
-                                }
-                                .padding(.vertical, 12)
-                                .padding(.horizontal, 24)
-                                .background(Color.green)
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 8)
-                        }
-                        
-                        // Display count information
-                        Text("Showing \(min(displayedListingCount, priceResults.items.count)) of \(priceResults.items.count) items")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    } else {
-                        Text("No individual listings available to display")
-                            .foregroundColor(.gray)
-                            .padding()
-                    }
-                }
-                .padding()
-                .background(Color(.systemBackground))
-                .cornerRadius(10)
-                .padding(.horizontal)
-                
-                Button(action: {
-                    activeTab = 1 // Go back to analysis tab
-                }) {
-                    Text("← Back to Analysis")
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 16)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                }
-                .padding()
-            } else if isPriceLoading {
-                VStack(spacing: 16) {
-                    ProgressView("Loading price data...")
-                        .padding()
-                    if let item = selectedItemForPricing {
-                        Text("Searching for: \(item)")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                }
-            } else if let error = priceError {
-                VStack {
-                    Text("Error:")
-                        .font(.headline)
-                        .foregroundColor(.red)
-                    
-                    Text(error)
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(10)
-                        .padding(.horizontal)
-                    
-                    Button(action: {
-                        activeTab = 1 // Go back to analysis tab
-                    }) {
-                        Text("← Back to Analysis")
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 16)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                    }
-                    .padding()
-                }
-            } else {
-                VStack {
-                    Text("Select an item to check pricing")
-                        .foregroundColor(.gray)
-                        .padding()
-                    
-                    Button(action: {
-                        activeTab = 1
-                    }) {
-                        Text("← Go to Item Selection")
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 16)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                    }
-                }
-            }
-        }
-        .padding(.vertical)
-        .onAppear {
-            print("Pricing tab appeared. isPriceLoading: \(isPriceLoading), has results: \(priceResults != nil), has error: \(priceError != nil)")
-        }
     }
     
     // MARK: - Helper Methods
@@ -755,11 +361,6 @@ struct ContentView: View {
         
         DispatchQueue.main.async {
             self.identifiedItems = items
-            
-            // Automatically fetch prices for each item
-            for item in items {
-                fetchPriceForItem(item)
-            }
         }
     }
     
@@ -775,201 +376,6 @@ struct ContentView: View {
             .filter { $0.count > 5 } // Only include items with some substance
             .prefix(10) // Limit to 10 items
             .map { String($0) }
-    }
-    
-    // Fetch price for a single item
-    func fetchPriceForItem(_ item: String) {
-        // Set loading state for this item
-        itemPrices[item] = (isLoading: true, result: nil, error: nil)
-        
-        // Extract only the product name, removing descriptions
-        let productName = item
-            .split(separator: "-").first?
-            .split(separator: ",").first?
-            .replacingOccurrences(of: "\\(.*\\)", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "**", with: "")
-            .replacingOccurrences(of: "*", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? item.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Store the search query for reference
-        searchQuery = productName
-        
-        Task {
-            let result = await ebayService.searchCompletedItems(keyword: productName)
-            
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let searchResult):
-                    // Update the price info for this item
-                    itemPrices[item] = (isLoading: false, result: searchResult, error: nil)
-                    print("Found \(searchResult.itemCount) items for \(item) with price range: $\(searchResult.lowestPrice) - $\(searchResult.highestPrice)")
-                    
-                case .failure(let error):
-                    var errorMessage = "No price data available"
-                    
-                    if let ebayError = error as? EbayError {
-                        switch ebayError {
-                        case .noItemsFound:
-                            errorMessage = "No items found on eBay"
-                        case .networkError(let message), .parsingError(let message), .authenticationError(let message):
-                            errorMessage = message
-                        }
-                    } else {
-                        errorMessage = error.localizedDescription
-                    }
-                    
-                    // Update the error state for this item
-                    itemPrices[item] = (isLoading: false, result: nil, error: errorMessage)
-                    print("eBay search error for \(item): \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-    
-    // Add this function to calculate match confidence
-    private func calculateConfidence(item: String, results: EbaySearchResult) -> Double {
-        // Simple implementation for now - can be enhanced with more sophisticated matching
-        
-        // Start with base confidence level depending on number of results
-        var confidence = min(0.5 + (Double(results.itemCount) / 20.0), 0.9)
-        
-        // Check if item name appears in the first result title (best match)
-        if let firstTitle = results.items.first?.title.lowercased() {
-            let itemWords = item.lowercased().split(separator: " ")
-            var wordMatchCount = 0
-            
-            for word in itemWords where word.count > 3 {  // Only consider meaningful words
-                if firstTitle.contains(word.lowercased()) {
-                    wordMatchCount += 1
-                }
-            }
-            
-            // Boost confidence based on word matches
-            let matchRatio = Double(wordMatchCount) / Double(max(1, itemWords.count))
-            confidence = min(confidence + (matchRatio * 0.4), 1.0)
-        }
-        
-        // Price consistency also factors into confidence
-        let priceRange = results.highestPrice - results.lowestPrice
-        let priceVariation = priceRange / max(1.0, results.averagePrice)
-        
-        // If prices are consistent (low variation), increase confidence
-        if priceVariation < 0.5 {
-            confidence = min(confidence + 0.1, 1.0)
-        } else if priceVariation > 1.0 {
-            // High variation might indicate mixed results
-            confidence = max(confidence - 0.1, 0.0)
-        }
-        
-        return confidence
-    }
-    
-    // Add a confidence indicator view
-    struct ConfidenceIndicator: View {
-        let level: Double  // 0.0 to 1.0
-        
-        var body: some View {
-            HStack(spacing: 2) {
-                ForEach(0..<5) { index in
-                    Rectangle()
-                        .fill(colorForLevel(index: index))
-                        .frame(width: 10, height: 6)
-                        .cornerRadius(1)
-                }
-                
-                Text(confidenceText)
-                    .font(.caption2)
-                    .foregroundColor(confidenceColor)
-                    .padding(.leading, 4)
-            }
-        }
-        
-        private var confidenceText: String {
-            if level < 0.3 {
-                return "Low"
-            } else if level < 0.6 {
-                return "Medium"
-            } else if level < 0.8 {
-                return "Good"
-            } else {
-                return "High"
-            }
-        }
-        
-        private var confidenceColor: Color {
-            if level < 0.3 {
-                return .red
-            } else if level < 0.6 {
-                return .orange
-            } else if level < 0.8 {
-                return .blue
-            } else {
-                return .green
-            }
-        }
-        
-        private func colorForLevel(index: Int) -> Color {
-            let threshold = Double(index + 1) / 5.0
-            if level >= threshold {
-                return confidenceColor
-            } else {
-                return Color(.systemGray5)
-            }
-        }
-    }
-    
-    // Add this new function to load more results from eBay
-    private func fetchMoreEbayResults() {
-        guard let item = selectedItemForPricing else { return }
-        
-        // Double the number of items to load
-        loadedItemLimit = min(loadedItemLimit * 2, 200)
-        isPriceLoading = true
-        
-        Task {
-            // Extract only the product name, using the same logic as fetchPriceForItem
-            let productName = item
-                .split(separator: "-").first?
-                .split(separator: ",").first?
-                .replacingOccurrences(of: "\\(.*\\)", with: "", options: .regularExpression)
-                .replacingOccurrences(of: "**", with: "")
-                .replacingOccurrences(of: "*", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? item.trimmingCharacters(in: .whitespacesAndNewlines)
-                
-            // Update the search query for reference
-            searchQuery = productName
-                
-            let result = await ebayService.searchCompletedItems(keyword: productName, itemLimit: loadedItemLimit)
-            
-            DispatchQueue.main.async {
-                isPriceLoading = false
-                
-                switch result {
-                case .success(let searchResult):
-                    priceResults = searchResult
-                    itemPrices[item] = (isLoading: false, result: searchResult, error: nil)
-                    print("Loaded \(searchResult.itemCount) items from eBay")
-                    
-                    // Reset displayed count to show we have new items
-                    displayedListingCount = min(displayedListingCount + 5, searchResult.items.count)
-                    
-                case .failure(let error):
-                    print("Error loading more results: \(error.localizedDescription)")
-                    // Keep existing results but show error
-                    var errorMessage = "Failed to load more results"
-                    if let ebayError = error as? EbayError {
-                        switch ebayError {
-                        case .noItemsFound:
-                            errorMessage = "No additional items found"
-                        case .networkError(let message), .parsingError(let message), .authenticationError(let message):
-                            errorMessage = message
-                        }
-                    }
-                    // Show error alert or message
-                    priceError = errorMessage
-                }
-            }
-        }
     }
 }
 

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ObjectiveC
 
 // Simple result structures
 struct EbayItem: Equatable {
@@ -24,11 +25,21 @@ struct EbaySearchResult: Equatable {
     let items: [EbayItem]
 }
 
+// Service-specific error type separate from model EbayError
 enum EbayError: Error {
     case networkError(String)
     case parsingError(String)
     case noItemsFound
     case authenticationError(String)
+    case rateLimitExceeded
+    case httpError(Int)
+    case jsonParsingError(String)
+    case invalidSearchTerm
+    case invalidURL
+    case noDataReceived
+    case invalidResponse
+    case apiError(String)
+    case noAccessToken
 }
 
 // OAuth Token Response
@@ -43,6 +54,8 @@ struct OAuthToken: Codable {
         case tokenType = "token_type"
     }
 }
+
+// Associated object keys for EbaySearchResult extension
 
 // Basic eBay API Service
 class EbayApiService {
@@ -134,235 +147,206 @@ class EbayApiService {
         }
     }
     
-    // Basic function to search eBay
-    func searchCompletedItems(keyword: String, itemLimit: Int = 25) async -> Result<EbaySearchResult, Error> {
-        if useMockData {
-            // Return mock data instead of calling the API
-            return generateMockResults(for: keyword, count: itemLimit)
+    // Check if the current token is valid
+    private func isTokenValid() -> Bool {
+        guard let token = authToken, let expirationDate = tokenExpirationDate else {
+            return false
         }
         
-        // Get OAuth token first
+        // Check if token is still valid with a 5-minute buffer
+        return expirationDate > Date().addingTimeInterval(300)
+    }
+    
+    // Refresh the OAuth token
+    private func refreshToken() async -> Result<Void, Error> {
         let tokenResult = await getOAuthToken()
         
         switch tokenResult {
+        case .success:
+            return .success(())
         case .failure(let error):
-            print("Failed to get OAuth token: \(error.localizedDescription)")
             return .failure(error)
-            
-        case .success(let token):
-            // Clean up the search term and remove any asterisks or special formatting
-            let searchTerm = keyword
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingOccurrences(of: "**", with: "")
-                .replacingOccurrences(of: "*", with: "")
-            
-            // Create eBay API URL - using a simplified approach to avoid encoding issues
-            let baseUrl = "https://api.ebay.com"
-            
-            // Simplify the query to just basic search with no complex filters
-            guard var urlComponents = URLComponents(string: "\(baseUrl)/buy/browse/v1/item_summary/search") else {
-                return .failure(EbayError.networkError("Invalid URL components"))
-            }
-            
-            // Add query parameters individually to ensure proper encoding
-            var queryItems = [
-                URLQueryItem(name: "q", value: searchTerm),
-                URLQueryItem(name: "limit", value: String(min(itemLimit, 200))) // eBay API has a max limit of 200
-            ]
-            
-            // Attempt to add filters that are properly URL encoded
-            if !isSandboxMode {
-                queryItems.append(URLQueryItem(name: "filter", value: "buyingOptions:{FIXED_PRICE}"))
-                queryItems.append(URLQueryItem(name: "filter", value: "itemLocationCountry:US"))
-            }
-            
-            urlComponents.queryItems = queryItems
-            
-            guard let url = urlComponents.url else {
-                return .failure(EbayError.networkError("Invalid URL"))
-            }
-            
-            print("Requesting URL: \(url)")
-            
-            var request = URLRequest(url: url)
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.addValue("application/json", forHTTPHeaderField: "Accept")
-            // Additional headers required by eBay API
-            request.addValue("en-US", forHTTPHeaderField: "Accept-Language")
-            request.addValue("EBAY-US", forHTTPHeaderField: "X-EBAY-C-MARKETPLACE-ID")
-            
-            do {
-                // API request with OAuth token
-                let (data, response) = try await URLSession.shared.data(for: request)
-                
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    return .failure(EbayError.networkError("Invalid response"))
-                }
-                
-                print("Response status: \(httpResponse.statusCode)")
-                
-                if httpResponse.statusCode != 200 {
-                    if let responseString = String(data: data, encoding: .utf8) {
-                        print("Error response: \(responseString)")
-                        
-                        // Check for specific error signatures
-                        if responseString.contains("Service call has exceeded") || responseString.contains("RateLimiter") {
-                            return .failure(EbayError.networkError("Rate limit exceeded. Please try again later."))
-                        }
-                    }
-                    
-                    return .failure(EbayError.networkError("Server error: \(httpResponse.statusCode)"))
-                }
-                
-                // Try a general search if specific search returns no results
-                let result = parseOAuthResponse(data: data)
-                if case .failure(EbayError.noItemsFound) = result {
-                    // Try again with a more general search term
-                    let generalSearchTerm = searchTerm.split(separator: " ").prefix(2).joined(separator: " ")
-                    if generalSearchTerm != searchTerm && !generalSearchTerm.isEmpty {
-                        print("No results found, trying more general search: \(generalSearchTerm)")
-                        
-                        // Update URL components with the more general search term
-                        urlComponents.queryItems?[0] = URLQueryItem(name: "q", value: generalSearchTerm)
-                        
-                        if let newUrl = urlComponents.url {
-                            var newRequest = URLRequest(url: newUrl)
-                            newRequest.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                            newRequest.addValue("application/json", forHTTPHeaderField: "Accept")
-                            newRequest.addValue("en-US", forHTTPHeaderField: "Accept-Language")
-                            newRequest.addValue("EBAY-US", forHTTPHeaderField: "X-EBAY-C-MARKETPLACE-ID")
-                            
-                            let (newData, newResponse) = try await URLSession.shared.data(for: newRequest)
-                            
-                            if let newHttpResponse = newResponse as? HTTPURLResponse, newHttpResponse.statusCode == 200 {
-                                return parseOAuthResponse(data: newData)
-                            }
-                        }
-                    }
-                }
-                
-                return result
-            } catch {
-                print("Network error: \(error.localizedDescription)")
+        }
+    }
+    
+    // Basic function to search eBay
+    func searchCompletedItems(keyword: String, itemLimit: Int = 50) async -> Result<EbaySearchResult, Error> {
+        print("🔍 Searching for items: \(keyword) with limit \(itemLimit)")
+        
+        // Check if token is valid, if not refresh it
+        if !isTokenValid() {
+            let tokenResult = await refreshToken()
+            switch tokenResult {
+            case .success:
+                print("✅ Token refreshed successfully")
+            case .failure(let error):
+                print("❌ Failed to refresh token: \(error.localizedDescription)")
                 return .failure(error)
             }
+        }
+        
+        guard let accessToken = self.authToken else {
+            print("❌ No access token available")
+            return .failure(EbayError.noAccessToken)
+        }
+        
+        // Clean up the search term
+        let searchTerm = keyword
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "*", with: "")
+        
+        print("🔍 Search term: \(searchTerm)")
+        
+        // Create URL with appropriate query parameters based on eBay Browse API
+        guard var components = URLComponents(string: "https://api.ebay.com/buy/browse/v1/item_summary/search") else {
+            return .failure(EbayError.invalidURL)
+        }
+        
+        // Basic query parameters
+        components.queryItems = [
+            URLQueryItem(name: "q", value: searchTerm),
+            URLQueryItem(name: "limit", value: String(min(itemLimit, 200))),
+            // Request full item details including aspects for more comprehensive data
+            URLQueryItem(name: "fieldgroups", value: "FULL")
+        ]
+        
+        // According to documentation, we can use filters to get more specific results
+        // Include both auction and fixed-price formats to get more complete data
+        components.queryItems?.append(URLQueryItem(name: "filter", value: "buyingOptions:{AUCTION|FIXED_PRICE}"))
+        
+        // Filter for US marketplace for more consistent results
+        components.queryItems?.append(URLQueryItem(name: "filter", value: "itemLocationCountry:US"))
+        
+        guard let url = components.url else {
+            print("❌ Failed to create URL")
+            return .failure(EbayError.invalidURL)
+        }
+        
+        print("🔗 API URL: \(url.absoluteString)")
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        // According to documentation, must specify marketplace ID
+        request.addValue("EBAY_US", forHTTPHeaderField: "X-EBAY-C-MARKETPLACE-ID")
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ Invalid response type")
+                return .failure(EbayError.invalidResponse)
+            }
+            
+            print("🌐 API Response Code: \(httpResponse.statusCode)")
+            
+            if httpResponse.statusCode == 200 {
+                // Parse the response with proper price calculations
+                return parseSearchResponse(data: data)
+            } else if httpResponse.statusCode == 429 {
+                print("⚠️ Rate limit exceeded")
+                if let errorText = String(data: data, encoding: .utf8) {
+                    print("❌ API Error: \(errorText)")
+                }
+                return .failure(EbayError.rateLimitExceeded)
+            } else {
+                if let errorText = String(data: data, encoding: .utf8) {
+                    print("❌ API Error: \(errorText)")
+                }
+                return .failure(EbayError.httpError(httpResponse.statusCode))
+            }
+        } catch {
+            print("❌ Network Error: \(error.localizedDescription)")
+            return .failure(error)
         }
     }
     
     // Updated parsing function for OAuth response format
     private func parseOAuthResponse(data: Data) -> Result<EbaySearchResult, Error> {
         do {
-            // Debug: Print the raw response
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("Raw eBay response: \(responseString)")
+            // Log a preview of the response for debugging
+            if let jsonString = String(data: data, encoding: .utf8) {
+                let maxLength = min(500, jsonString.count)
+                let previewString = String(jsonString.prefix(maxLength))
+                print("📦 JSON Preview: \(previewString)...")
             }
             
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            // Decode the JSON data into our model
+            let decoder = JSONDecoder()
+            var responseResult = try decoder.decode(EbayResponseResult.self, from: data)
             
-            // Debug: Check if we have the expected keys
-            if let json = json {
-                print("Response keys: \(json.keys.joined(separator: ", "))")
+            // Handle warnings and errors in the response
+            if let warning = responseResult.warning, !warning.isEmpty {
+                print("⚠️ API Warning: \(warning.first?.message ?? "Unknown warning")")
             }
             
-            // Handle case where API returns success but no items
-            if let total = json?["total"] as? Int, total == 0 {
-                print("eBay API returned zero results")
+            if let error = responseResult.error {
+                print("❌ API Error: \(error.message ?? "Unknown error")")
+                return .failure(EbayError.apiError(error.message ?? "Unknown error"))
+            }
+            
+            // Check if we have any items
+            guard let items = responseResult.itemSummaries, !items.isEmpty else {
+                print("📭 No items found in response")
                 return .failure(EbayError.noItemsFound)
             }
             
-            guard let itemSummaries = json?["itemSummaries"] as? [[String: Any]],
-                  !itemSummaries.isEmpty else {
-                print("No itemSummaries found in response")
-                return .failure(EbayError.noItemsFound)
-            }
+            print("🔢 Found \(items.count) total items")
             
-            var items: [EbayItem] = []
-            var totalPrice: Double = 0
-            var lowestPrice: Double = Double.greatestFiniteMagnitude
-            var highestPrice: Double = 0
+            // Calculate price statistics from the returned items
+            var lowestPrice = Double.greatestFiniteMagnitude
+            var highestPrice = 0.0
+            var totalPrice = 0.0
+            var itemCount = 0
+            var validItems = [EbayItem]()
             
-            for itemJson in itemSummaries {
-                // Basic item parsing adapted for Browse API response
-                let title = itemJson["title"] as? String ?? "Unknown"
-                
-                var price: Double = 0
-                if let priceObj = itemJson["price"] as? [String: Any],
-                   let value = priceObj["value"] as? String {
-                    price = Double(value) ?? 0
-                }
-                
-                let condition = (itemJson["condition"] as? String) ?? "Not specified"
-                let imageUrl = (itemJson["image"] as? [String: Any])?["imageUrl"] as? String
-                
-                // Extract the sold date if available - format nicely for display
-                var soldDate: String? = nil
-                if let addonSoldDate = itemJson["itemAffiliations"] as? [String: Any],
-                   let soldTimeStr = addonSoldDate["soldOn"] as? String {
-                    soldDate = formatSoldDate(soldTimeStr)
-                } else if let endDateStr = itemJson["itemEndDate"] as? String {
-                    // Alternative field - use as fallback
-                    soldDate = formatSoldDate(endDateStr)
-                } else if let timeStr = itemJson["itemCreationDate"] as? String {
-                    // Another fallback option
-                    soldDate = formatSoldDate(timeStr)
-                } else {
-                    // Always provide a date, even if we need to estimate it
-                    // Generate a random recent date to simulate sold dates
-                    let calendar = Calendar.current
-                    if let recentDate = calendar.date(byAdding: .day, value: -Int.random(in: 1...30), to: Date()) {
-                        let displayFormatter = DateFormatter()
-                        displayFormatter.dateStyle = .medium
-                        displayFormatter.timeStyle = .none
-                        soldDate = displayFormatter.string(from: recentDate)
-                    } else {
-                        soldDate = "Recently"
-                    }
-                }
-                
-                if price > 0 {
-                    let item = EbayItem(
-                        title: title,
-                        price: price,
-                        imageUrl: imageUrl,
-                        condition: condition,
-                        soldDate: soldDate
+            // Process each item to extract price data
+            for item in items {
+                // Extract price and create EbayItem objects
+                let priceValue = item.priceValue
+                if priceValue > 0 {
+                    lowestPrice = min(lowestPrice, priceValue)
+                    highestPrice = max(highestPrice, priceValue)
+                    totalPrice += priceValue
+                    itemCount += 1
+                    
+                    // Create simple EbayItem object from EbayItemSummary
+                    let ebayItem = EbayItem(
+                        title: item.title ?? "Unknown",
+                        price: priceValue,
+                        imageUrl: item.imageUrl,
+                        condition: item.condition ?? "Not specified",
+                        soldDate: item.soldDate
                     )
-                    
-                    items.append(item)
-                    totalPrice += price
-                    
-                    // Update lowest and highest prices
-                    if price < lowestPrice {
-                        lowestPrice = price
-                    }
-                    if price > highestPrice {
-                        highestPrice = price
-                    }
+                    validItems.append(ebayItem)
                 }
             }
             
-            if items.isEmpty {
+            // If no valid items with prices were found, return an error
+            if itemCount == 0 {
+                print("❌ No items with valid prices found")
                 return .failure(EbayError.noItemsFound)
             }
             
-            // If we only have one item, set low and high to the same value
-            if items.count == 1 {
-                lowestPrice = items[0].price
-                highestPrice = items[0].price
-            }
+            // Calculate average price
+            let averagePrice = totalPrice / Double(itemCount)
             
-            let averagePrice = totalPrice / Double(items.count)
+            print("💰 Price statistics: Avg=$\(String(format: "%.2f", averagePrice)), Range: $\(String(format: "%.2f", lowestPrice))-$\(String(format: "%.2f", highestPrice)), Count: \(itemCount)")
             
+            // Create a result with calculated price statistics
             let result = EbaySearchResult(
                 averagePrice: averagePrice,
                 lowestPrice: lowestPrice,
                 highestPrice: highestPrice,
-                itemCount: items.count,
-                items: items
+                itemCount: itemCount,
+                items: validItems
             )
             
             return .success(result)
         } catch {
+            print("❌ JSON Parsing Error: \(error.localizedDescription)")
             return .failure(EbayError.parsingError(error.localizedDescription))
         }
     }
@@ -582,5 +566,93 @@ class EbayApiService {
             return displayFormatter.string(from: recentDate)
         }
         return "Recently"
+    }
+    
+    // Parse the response from the eBay Browse API search
+    private func parseSearchResponse(data: Data) -> Result<EbaySearchResult, Error> {
+        do {
+            // Log a preview of the response for debugging
+            if let jsonString = String(data: data, encoding: .utf8) {
+                let maxLength = min(500, jsonString.count)
+                let previewString = String(jsonString.prefix(maxLength))
+                print("📦 JSON Preview: \(previewString)...")
+            }
+            
+            // Decode the JSON data into our model
+            let decoder = JSONDecoder()
+            var responseResult = try decoder.decode(EbayResponseResult.self, from: data)
+            
+            // Handle warnings and errors in the response
+            if let warning = responseResult.warning, !warning.isEmpty {
+                print("⚠️ API Warning: \(warning.first?.message ?? "Unknown warning")")
+            }
+            
+            if let error = responseResult.error {
+                print("❌ API Error: \(error.message ?? "Unknown error")")
+                return .failure(EbayError.apiError(error.message ?? "Unknown error"))
+            }
+            
+            // Check if we have any items
+            guard let items = responseResult.itemSummaries, !items.isEmpty else {
+                print("📭 No items found in response")
+                return .failure(EbayError.noItemsFound)
+            }
+            
+            print("🔢 Found \(items.count) total items")
+            
+            // Calculate price statistics from the returned items
+            var lowestPrice = Double.greatestFiniteMagnitude
+            var highestPrice = 0.0
+            var totalPrice = 0.0
+            var itemCount = 0
+            var validItems = [EbayItem]()
+            
+            // Process each item to extract price data
+            for item in items {
+                // Extract price and create EbayItem objects
+                let priceValue = item.priceValue
+                if priceValue > 0 {
+                    lowestPrice = min(lowestPrice, priceValue)
+                    highestPrice = max(highestPrice, priceValue)
+                    totalPrice += priceValue
+                    itemCount += 1
+                    
+                    // Create simple EbayItem object from EbayItemSummary
+                    let ebayItem = EbayItem(
+                        title: item.title ?? "Unknown",
+                        price: priceValue,
+                        imageUrl: item.imageUrl,
+                        condition: item.condition ?? "Not specified",
+                        soldDate: item.soldDate
+                    )
+                    validItems.append(ebayItem)
+                }
+            }
+            
+            // If no valid items with prices were found, return an error
+            if itemCount == 0 {
+                print("❌ No items with valid prices found")
+                return .failure(EbayError.noItemsFound)
+            }
+            
+            // Calculate average price
+            let averagePrice = totalPrice / Double(itemCount)
+            
+            print("💰 Price statistics: Avg=$\(String(format: "%.2f", averagePrice)), Range: $\(String(format: "%.2f", lowestPrice))-$\(String(format: "%.2f", highestPrice)), Count: \(itemCount)")
+            
+            // Create a result with calculated price statistics
+            let result = EbaySearchResult(
+                averagePrice: averagePrice,
+                lowestPrice: lowestPrice,
+                highestPrice: highestPrice,
+                itemCount: itemCount,
+                items: validItems
+            )
+            
+            return .success(result)
+        } catch {
+            print("❌ JSON Parsing Error: \(error.localizedDescription)")
+            return .failure(EbayError.parsingError(error.localizedDescription))
+        }
     }
 } 
