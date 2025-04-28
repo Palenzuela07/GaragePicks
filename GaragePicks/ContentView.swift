@@ -9,6 +9,7 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import WebKit
+import SwiftSoup
 
 #if canImport(UIKit)
 import UIKit
@@ -785,28 +786,57 @@ struct ContentView: View {
     private func fetchQuickPriceForIdentifiedItem(_ item: String) {
         let cleanedTerm = cleanSearchTerm(item)
         Task {
-            let components = createSearchComponents(for: cleanedTerm, page: 1)
-            let result = await ebayService.searchWithCustomComponents(components, itemLimit: 30)
+            let scrapedResult = await scrapeEbaySoldItemsWeb(term: cleanedTerm)
             DispatchQueue.main.async {
-                if case .success(let searchResult) = result {
-                    let filteredItems = filterEbayItemsByTitleMatch(searchTerm: cleanedTerm, items: searchResult.items)
-                    if !filteredItems.isEmpty {
-                        let prices = filteredItems.map { $0.price }
-                        let low = prices.min() ?? 0
-                        let high = prices.max() ?? 0
-                        let mean = prices.reduce(0, +) / Double(prices.count)
-                        let filteredResult = EbaySearchResult(
-                            averagePrice: mean,
-                            lowestPrice: low,
-                            highestPrice: high,
-                            itemCount: filteredItems.count,
-                            items: filteredItems
-                        )
-                        itemPriceResults[item] = filteredResult
-                    }
+                if let result = scrapedResult {
+                    itemPriceResults[item] = result
+                } else {
+                    // Mark as no data to avoid infinite loading
+                    itemPriceResults[item] = EbaySearchResult(averagePrice: 0, lowestPrice: 0, highestPrice: 0, itemCount: 0, items: [])
                 }
             }
         }
+    }
+    
+    private func scrapeEbaySoldItemsWeb(term: String) async -> EbaySearchResult? {
+        let urlString = "https://www.ebay.com/sch/i.html?_nkw=\(term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Complete=1&LH_Sold=1&_sop=10"
+        guard let url = URL(string: urlString) else { return nil }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let html = String(data: data, encoding: .utf8) else { return nil }
+            let doc = try SwiftSoup.parse(html)
+            let items = try doc.select("li.s-item").array().prefix(8)
+            var ebayItems: [EbayItem] = []
+            for item in items {
+                let title = try item.select(".s-item__title").first()?.text() ?? "Unknown"
+                let priceText = try item.select(".s-item__price").first()?.text() ?? ""
+                let price = parseEbayPrice(priceText)
+                let imageUrl = try item.select("img.s-item__image-img").first()?.attr("src")
+                let soldDate = try item.select(".s-item__title--tagblock .POSITIVE").first()?.text() ?? nil
+                let condition = try item.select(".s-item__subtitle").first()?.text() ?? "Not specified"
+                if price > 0 {
+                    ebayItems.append(EbayItem(title: title, price: price, imageUrl: imageUrl, condition: condition, soldDate: soldDate))
+                }
+            }
+            guard !ebayItems.isEmpty else { return nil }
+            let prices = ebayItems.map { $0.price }
+            let low = prices.min() ?? 0
+            let high = prices.max() ?? 0
+            let mean = prices.reduce(0, +) / Double(prices.count)
+            return EbaySearchResult(averagePrice: mean, lowestPrice: low, highestPrice: high, itemCount: ebayItems.count, items: ebayItems)
+        } catch {
+            print("Web scrape error: \(error)")
+            return nil
+        }
+    }
+    
+    private func parseEbayPrice(_ text: String) -> Double {
+        let cleaned = text.replacingOccurrences(of: "[\\$,]", with: "", options: .regularExpression)
+        let comps = cleaned.split(separator: " ")
+        for comp in comps {
+            if let value = Double(comp) { return value }
+        }
+        return 0
     }
     
     private func cleanSearchTerm(_ term: String) -> String {
