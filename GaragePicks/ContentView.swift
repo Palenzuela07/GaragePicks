@@ -885,9 +885,13 @@ struct ContentView: View {
                     if let firstImage = searchResult.items.first?.imageUrl {
                         itemImageURLs[item] = firstImage
                     }
+                    // Always re-sort when new price data arrives
+                    sortIdentifiedItems()
                 } else {
                     // Mark as no data to avoid infinite loading
                     itemPriceResults[item] = EbaySearchResult(averagePrice: 0, lowestPrice: 0, highestPrice: 0, itemCount: 0, items: [])
+                    // Still re-sort to handle the failed item
+                    sortIdentifiedItems()
                 }
             }
         }
@@ -982,12 +986,24 @@ struct ContentView: View {
     // Add sorting function
     private func sortIdentifiedItems() {
         if isSortedByPrice {
-            // Sort by mean price in descending order
-            identifiedItems.sort { item1, item2 in
-                let price1 = itemPriceResults[item1]?.averagePrice ?? 0
-                let price2 = itemPriceResults[item2]?.averagePrice ?? 0
-                return price1 > price2
+            // Create a temporary array of items with their prices
+            var itemsWithPrices: [(item: String, price: Double)] = []
+            
+            for item in identifiedItems {
+                if let priceResult = itemPriceResults[item] {
+                    itemsWithPrices.append((item: item, price: priceResult.averagePrice))
+                }
             }
+            
+            // Sort by price in descending order
+            itemsWithPrices.sort { $0.price > $1.price }
+            
+            // Update the identifiedItems array with the sorted order
+            identifiedItems = itemsWithPrices.map { $0.item }
+            
+            // Add any items without price data at the end
+            let itemsWithoutPrices = identifiedItems.filter { itemPriceResults[$0] == nil }
+            identifiedItems.append(contentsOf: itemsWithoutPrices)
         } else {
             // Sort alphabetically
             identifiedItems.sort()

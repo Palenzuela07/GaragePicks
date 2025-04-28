@@ -7,6 +7,7 @@
 
 import Foundation
 import ObjectiveC
+import SwiftSoup
 
 // Simple result structures
 struct EbayItem: Equatable {
@@ -660,72 +661,84 @@ class EbayApiService {
     func searchWithCustomComponents(_ components: URLComponents, itemLimit: Int = 50) async -> Result<EbaySearchResult, Error> {
         print("🔍 Searching with custom components and limit \(itemLimit)")
         
-        // Check if token is valid, if not refresh it
-        if !isTokenValid() {
-            let tokenResult = await refreshToken()
-            switch tokenResult {
-            case .success:
-                print("✅ Token refreshed successfully")
-            case .failure(let error):
-                print("❌ Failed to refresh token: \(error.localizedDescription)")
-                return .failure(error)
-            }
+        // Extract search term from components
+        guard let searchTerm = components.queryItems?.first(where: { $0.name == "q" })?.value else {
+            return .failure(EbayError.invalidSearchTerm)
         }
         
-        guard let accessToken = self.authToken else {
-            print("❌ No access token available")
-            return .failure(EbayError.noAccessToken)
+        // Use web scraping for the first 8 listings
+        if let scrapedResult = await scrapeEbaySoldItemsWeb(term: searchTerm) {
+            print("✅ Successfully scraped \(scrapedResult.items.count) items")
+            return .success(scrapedResult)
         }
         
-        guard let url = components.url else {
-            print("❌ Failed to create URL from components")
-            return .failure(EbayError.invalidURL)
-        }
+        return .failure(EbayError.noItemsFound)
+    }
+
+    private func scrapeEbaySoldItemsWeb(term: String) async -> EbaySearchResult? {
+        let urlString = "https://www.ebay.com/sch/i.html?_nkw=\(term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Complete=1&LH_Sold=1&_sop=10"
+        guard let url = URL(string: urlString) else { return nil }
         
-        print("🔗 API URL: \(url.absoluteString)")
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        // According to documentation, must specify marketplace ID
-        request.addValue("EBAY_US", forHTTPHeaderField: "X-EBAY-C-MARKETPLACE-ID")
+        print("🌐 Scraping URL: \(urlString)")
         
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let html = String(data: data, encoding: .utf8) else { return nil }
+            let doc = try SwiftSoup.parse(html)
             
-            guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ Invalid response type")
-                return .failure(EbayError.invalidResponse)
-            }
+            // Get the first 8 sold items
+            let items = try doc.select("li.s-item").array().prefix(8)
+            var ebayItems: [EbayItem] = []
             
-            print("🌐 API Response Code: \(httpResponse.statusCode)")
-            
-            // Log a sample of the response for debugging
-            if let jsonString = String(data: data, encoding: .utf8) {
-                let maxLength = min(500, jsonString.count)
-                let previewString = String(jsonString.prefix(maxLength))
-                print("📦 Response preview: \(previewString)...")
-            }
-            
-            if httpResponse.statusCode == 200 {
-                // Parse the response with proper price calculations
-                return parseSearchResponse(data: data)
-            } else if httpResponse.statusCode == 429 {
-                print("⚠️ Rate limit exceeded")
-                if let errorText = String(data: data, encoding: .utf8) {
-                    print("❌ API Error: \(errorText)")
+            for item in items {
+                let title = try item.select(".s-item__title").first()?.text() ?? "Unknown"
+                let priceText = try item.select(".s-item__price").first()?.text() ?? ""
+                let price = parseEbayPrice(priceText)
+                let imageUrl = try item.select("img.s-item__image-img").first()?.attr("src")
+                let soldDate = try item.select(".s-item__title--tagblock .POSITIVE").first()?.text()
+                let condition = try item.select(".s-item__subtitle").first()?.text() ?? "Not specified"
+                
+                if price > 0 {
+                    ebayItems.append(EbayItem(
+                        title: title,
+                        price: price,
+                        imageUrl: imageUrl,
+                        condition: condition,
+                        soldDate: soldDate
+                    ))
                 }
-                return .failure(EbayError.rateLimitExceeded)
-            } else {
-                if let errorText = String(data: data, encoding: .utf8) {
-                    print("❌ API Error: \(errorText)")
-                }
-                return .failure(EbayError.httpError(httpResponse.statusCode))
             }
+            
+            guard !ebayItems.isEmpty else { return nil }
+            
+            // Calculate price statistics
+            let prices = ebayItems.map { $0.price }
+            let low = prices.min() ?? 0
+            let high = prices.max() ?? 0
+            let mean = prices.reduce(0, +) / Double(prices.count)
+            
+            print("💰 Scraped price statistics: Avg=$\(String(format: "%.2f", mean)), Range: $\(String(format: "%.2f", low))-$\(String(format: "%.2f", high)), Count: \(ebayItems.count)")
+            
+            return EbaySearchResult(
+                averagePrice: mean,
+                lowestPrice: low,
+                highestPrice: high,
+                itemCount: ebayItems.count,
+                items: ebayItems
+            )
         } catch {
-            print("❌ Network Error: \(error.localizedDescription)")
-            return .failure(error)
+            print("❌ Web scrape error: \(error)")
+            return nil
         }
+    }
+
+    private func parseEbayPrice(_ text: String) -> Double {
+        // Remove currency symbol and commas, then convert to double
+        let cleaned = text.replacingOccurrences(of: "[\\$,]", with: "", options: .regularExpression)
+        let comps = cleaned.split(separator: " ")
+        for comp in comps {
+            if let value = Double(comp) { return value }
+        }
+        return 0
     }
 } 
