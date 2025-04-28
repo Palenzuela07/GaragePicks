@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var itemPriceResults: [String: EbaySearchResult] = [:]
     @State private var itemImageURLs: [String: String] = [:]
     @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
+    @State private var isSortedByPrice: Bool = false // New state for sorting
     
     // Pricing-related state
     @State private var selectedItemForPricing: String? = nil
@@ -331,9 +332,28 @@ struct ContentView: View {
             // Existing identified items
             if !identifiedItems.isEmpty {
                 VStack(alignment: .leading) {
-                    Text("Identified Items (tap to search eBay):")
-                        .font(.headline)
-                        .padding(.horizontal)
+                    HStack {
+                        Text("Identified Items (tap to search eBay):")
+                            .font(.headline)
+                        Spacer()
+                        Button(action: {
+                            isSortedByPrice.toggle()
+                            sortIdentifiedItems()
+                        }) {
+                            HStack {
+                                Image(systemName: isSortedByPrice ? "arrow.up.arrow.down" : "arrow.up.arrow.down")
+                                Text(isSortedByPrice ? "Sort by Name" : "Sort by Price")
+                            }
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                        }
+                    }
+                    .padding(.horizontal)
+                    
                     ForEach(identifiedItems, id: \.self) { item in
                         Button(action: {
                             openEbayWebViewForItem(item)
@@ -957,6 +977,21 @@ struct ContentView: View {
             }
         }
         return nil
+    }
+
+    // Add sorting function
+    private func sortIdentifiedItems() {
+        if isSortedByPrice {
+            // Sort by mean price in descending order
+            identifiedItems.sort { item1, item2 in
+                let price1 = itemPriceResults[item1]?.averagePrice ?? 0
+                let price2 = itemPriceResults[item2]?.averagePrice ?? 0
+                return price1 > price2
+            }
+        } else {
+            // Sort alphabetically
+            identifiedItems.sort()
+        }
     }
 }
 
