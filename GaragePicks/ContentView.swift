@@ -13,6 +13,7 @@ import WebKit
 struct ContentView: View {
     @State private var selectedImage: UIImage?
     @State private var isImagePickerPresented = false
+    @State private var isCameraPresented = false
     @State private var analysisResults: String = ""
     @State private var isAnalyzing: Bool = false
     @State private var identifiedItems: [String] = []
@@ -46,7 +47,8 @@ struct ContentView: View {
             URLQueryItem(name: "q", value: searchTerm),
             URLQueryItem(name: "limit", value: "100"), // Max results per page
             URLQueryItem(name: "offset", value: "\(offset)"), // Pagination offset
-            URLQueryItem(name: "fieldgroups", value: "FULL")
+            URLQueryItem(name: "fieldgroups", value: "FULL"),
+            URLQueryItem(name: "descriptionSearch", value: "false") // Only search item titles
         ]
         
         // Filter for completed AND sold items (both are required to match eBay website)
@@ -66,7 +68,6 @@ struct ContentView: View {
     private func createEbayWebUrlForSoldItems(_ searchTerm: String) -> URL {
         let encodedTerm = searchTerm.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         return URL(string: "https://www.ebay.com/sch/i.html?_nkw=\(encodedTerm)&LH_Complete=1&LH_Sold=1&_sop=10")!
-        // _sop=10 is for "Newly Listed" items
     }
     
     // Opens the eBay app with the given search term, falls back to Safari if the app isn't installed
@@ -115,7 +116,7 @@ struct ContentView: View {
                     activeTab = 1
                 }
                 
-                TabButton(title: "Completed & Sold", isActive: activeTab == 2) {
+                TabButton(title: "eBay", isActive: activeTab == 2) {
                     activeTab = 2
                 }
             }
@@ -133,7 +134,10 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $isImagePickerPresented) {
-            ImagePicker(selectedImage: $selectedImage)
+            ImagePicker(selectedImage: $selectedImage, sourceType: .photoLibrary)
+        }
+        .fullScreenCover(isPresented: $isCameraPresented) {
+            CameraView(selectedImage: $selectedImage)
         }
         .sheet(isPresented: $isWebViewPresented) {
             if let url = webViewURL {
@@ -179,25 +183,35 @@ struct ContentView: View {
             
             HStack(spacing: 20) {
                 Button(action: {
-                    isImagePickerPresented = true
+                    isCameraPresented = true
                 }) {
-                    Text("Choose Photo")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                    HStack {
+                        Image(systemName: "camera")
+                            .font(.title2)
+                        Text("Take or Choose Photo")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
                 }
                 
                 Button(action: {
                     analyzePhoto()
                 }) {
-                    Text(isAnalyzing ? "Analyzing..." : "Analyze")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(selectedImage == nil ? Color.gray : Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .font(.title2)
+                        Text(isAnalyzing ? "Analyzing..." : "Analyze")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(selectedImage == nil ? Color.gray : Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
                 }
                 .disabled(selectedImage == nil || isAnalyzing)
             }
@@ -744,26 +758,45 @@ struct ContentView: View {
 struct ImagePicker: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
     @Environment(\.presentationMode) var presentationMode
+    let sourceType: UIImagePickerController.SourceType
     
-    func makeUIViewController(context: Context) -> PHPickerViewController {
-        var config = PHPickerConfiguration()
-        config.filter = .images
-        let picker = PHPickerViewController(configuration: config)
-        picker.delegate = context.coordinator
-        return picker
+    func makeUIViewController(context: Context) -> UIViewController {
+        if sourceType == .camera {
+            let picker = UIImagePickerController()
+            picker.delegate = context.coordinator
+            picker.sourceType = sourceType
+            return picker
+        } else {
+            var config = PHPickerConfiguration()
+            config.filter = .images
+            let picker = PHPickerViewController(configuration: config)
+            picker.delegate = context.coordinator
+            return picker
+        }
     }
     
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
     
-    class Coordinator: NSObject, PHPickerViewControllerDelegate {
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate, PHPickerViewControllerDelegate {
         let parent: ImagePicker
         
         init(_ parent: ImagePicker) {
             self.parent = parent
+        }
+        
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.selectedImage = image
+            }
+            parent.presentationMode.wrappedValue.dismiss()
+        }
+        
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.presentationMode.wrappedValue.dismiss()
         }
         
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
