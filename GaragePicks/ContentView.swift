@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var isAnalyzing: Bool = false
     @State private var identifiedItems: [String] = []
     @State private var itemPriceResults: [String: EbaySearchResult] = [:]
+    @State private var itemImageURLs: [String: String] = [:]
     @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
     
     // Pricing-related state
@@ -294,6 +295,30 @@ struct ContentView: View {
                             openEbayWebViewForItem(item)
                         }) {
                             HStack {
+                                // Show image if available
+                                if let imageUrl = itemImageURLs[item], let url = URL(string: imageUrl) {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .empty:
+                                            ProgressView()
+                                                .frame(width: 36, height: 36)
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 36, height: 36)
+                                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        case .failure:
+                                            Image(systemName: "photo")
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 24, height: 24)
+                                                .foregroundColor(.gray)
+                                        @unknown default:
+                                            EmptyView()
+                                        }
+                                    }
+                                }
                                 Text(item)
                                     .lineLimit(2)
                                     .font(.headline)
@@ -786,10 +811,15 @@ struct ContentView: View {
     private func fetchQuickPriceForIdentifiedItem(_ item: String) {
         let cleanedTerm = cleanSearchTerm(item)
         Task {
-            let scrapedResult = await scrapeEbaySoldItemsWeb(term: cleanedTerm)
+            let components = createSearchComponents(for: cleanedTerm, page: 1)
+            let result = await ebayService.searchWithCustomComponents(components, itemLimit: 8)
             DispatchQueue.main.async {
-                if let result = scrapedResult {
-                    itemPriceResults[item] = result
+                if case .success(let searchResult) = result {
+                    itemPriceResults[item] = searchResult
+                    // Store the first image URL if available
+                    if let firstImage = searchResult.items.first?.imageUrl {
+                        itemImageURLs[item] = firstImage
+                    }
                 } else {
                     // Mark as no data to avoid infinite loading
                     itemPriceResults[item] = EbaySearchResult(averagePrice: 0, lowestPrice: 0, highestPrice: 0, itemCount: 0, items: [])
