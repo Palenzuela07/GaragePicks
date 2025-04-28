@@ -16,6 +16,7 @@ struct CameraView: View {
     @State private var selectedPhotos: [UIImage] = []
     @State private var selectedLibraryPhoto: UIImage? = nil
     @State private var selectedPhotoAssets: [PHAsset] = []
+    @State private var selectedLibraryAsset: PHAsset? = nil
     
     var body: some View {
         GeometryReader { geometry in
@@ -120,13 +121,14 @@ struct CameraView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                                .stroke(selectedLibraryPhoto == image ? Color.blue : Color.clear, lineWidth: 4)
+                                                .stroke(selectedLibraryAsset == selectedPhotoAssets[idx] ? Color.blue : Color.clear, lineWidth: 4)
                                         )
-                                        .shadow(color: selectedLibraryPhoto == image ? Color.blue.opacity(0.2) : Color.black.opacity(0.1), radius: 8, y: 2)
+                                        .shadow(color: selectedLibraryAsset == selectedPhotoAssets[idx] ? Color.blue.opacity(0.2) : Color.black.opacity(0.1), radius: 8, y: 2)
                                         .onTapGesture {
                                             fetchFullSizeImage(for: selectedPhotoAssets[idx])
+                                            selectedLibraryAsset = selectedPhotoAssets[idx]
                                         }
-                                    if selectedLibraryPhoto == image {
+                                    if selectedLibraryAsset == selectedPhotoAssets[idx] {
                                         Circle()
                                             .fill(Color.blue)
                                             .frame(width: 28, height: 28)
@@ -263,6 +265,7 @@ struct CameraView: View {
                 DispatchQueue.main.async {
                     selectedLibraryPhoto = image
                     selectedImage = image
+                    selectedLibraryAsset = asset
                 }
             }
         }

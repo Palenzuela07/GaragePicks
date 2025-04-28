@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var analysisResults: String = ""
     @State private var isAnalyzing: Bool = false
     @State private var identifiedItems: [String] = []
+    @State private var itemPriceResults: [String: EbaySearchResult] = [:]
     @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
     
     // Pricing-related state
@@ -151,10 +152,16 @@ struct ContentView: View {
                 })
             }
         }
-        .onChange(of: identifiedItems) { _ in
+        .onChange(of: identifiedItems) { newItems in
             // When items are identified, switch to the analysis tab
-            if !identifiedItems.isEmpty {
+            if !newItems.isEmpty {
                 activeTab = 1
+                // Fetch price data for each identified item if not already fetched
+                for item in newItems {
+                    if itemPriceResults[item] == nil {
+                        fetchQuickPriceForIdentifiedItem(item)
+                    }
+                }
             }
         }
         .onChange(of: isPriceLoading) { isLoading in
@@ -224,11 +231,50 @@ struct ContentView: View {
     
     var analysisTabContent: some View {
         VStack(spacing: 16) {
+            // Show the selected image at the top
+            if let image = selectedImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 220)
+                    .cornerRadius(10)
+                    .padding(.horizontal, 8)
+            }
+            // Show price stats if available
+            if let priceResults = priceResults {
+                HStack(spacing: 24) {
+                    VStack {
+                        Text("Low")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("$\(String(format: "%.2f", priceResults.lowestPrice))")
+                            .font(.headline)
+                            .foregroundColor(.green)
+                    }
+                    VStack {
+                        Text("Mean")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("$\(String(format: "%.2f", priceResults.averagePrice))")
+                            .font(.headline)
+                            .foregroundColor(.blue)
+                    }
+                    VStack {
+                        Text("High")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("$\(String(format: "%.2f", priceResults.highestPrice))")
+                            .font(.headline)
+                            .foregroundColor(.red)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            // Existing analysis results
             if !analysisResults.isEmpty {
                 VStack(alignment: .leading) {
                     Text("Analysis Results:")
                         .font(.headline)
-                    
                     Text(analysisResults)
                         .padding()
                         .background(Color(.systemGray6))
@@ -236,13 +282,12 @@ struct ContentView: View {
                 }
                 .padding(.horizontal)
             }
-            
+            // Existing identified items
             if !identifiedItems.isEmpty {
                 VStack(alignment: .leading) {
                     Text("Identified Items (tap to search eBay):")
                         .font(.headline)
                         .padding(.horizontal)
-                    
                     ForEach(identifiedItems, id: \.self) { item in
                         Button(action: {
                             openEbayWebViewForItem(item)
@@ -253,12 +298,19 @@ struct ContentView: View {
                                     .font(.headline)
                                     .foregroundColor(.primary)
                                     .multilineTextAlignment(.leading)
-                                
                                 Spacer()
-                                
+                                if let stats = itemPriceResults[item] {
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text("Low: $\(String(format: "%.2f", stats.lowestPrice))")
+                                            .font(.caption2)
+                                            .foregroundColor(.green)
+                                        Text("High: $\(String(format: "%.2f", stats.highestPrice))")
+                                            .font(.caption2)
+                                            .foregroundColor(.red)
+                                    }
+                                }
                                 Image(systemName: "tag")
                                     .foregroundColor(.blue)
-                                
                                 Text("Search Completed & Sold")
                                     .font(.caption)
                                     .foregroundColor(.blue)
@@ -274,7 +326,6 @@ struct ContentView: View {
                     }
                 }
             }
-            
             if isAnalyzing {
                 ProgressView("Analyzing image...")
                     .padding()
@@ -389,15 +440,7 @@ struct ContentView: View {
     // Open eBay WebView for a specific item
     private func openEbayWebViewForItem(_ item: String) {
         // Clean the search term
-        let cleanedTerm = item
-            .replacingOccurrences(of: "\"", with: "")
-            .replacingOccurrences(of: """
-            , with: "")
-            .replacingOccurrences(of:
- """, with: "")
-            .replacingOccurrences(of: "'", with: "")
-            .replacingOccurrences(of: "'", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedTerm = cleanSearchTerm(item)
         
         // Set the selected item for the pricing tab
         selectedItemForPricing = item
@@ -615,52 +658,29 @@ struct ContentView: View {
         currentPage = 1
         displayedListingCount = 10
         hasMoreResults = false
-        
-        // Set loading state and selected item
         isPriceLoading = true
         selectedItemForPricing = item
         priceError = nil
-        
-        // Clean up the search term to be more effective
-        let cleanedTerm = item
-            .replacingOccurrences(of: "\"", with: "")
-            .replacingOccurrences(of: """
-            , with: "")
-            .replacingOccurrences(of:
- """, with: "")
-            .replacingOccurrences(of: "'", with: "")
-            .replacingOccurrences(of: "'", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        
+        let cleanedTerm = cleanSearchTerm(item)
         Task {
             let components = createSearchComponents(for: cleanedTerm, page: 1)
-            
-            // Print the URL for debugging
             if let url = components.url {
                 print("🔗 API URL: \(url.absoluteString)")
             }
-            
-            // Use the custom components method
             let result = await ebayService.searchWithCustomComponents(components, itemLimit: 100)
-            
             DispatchQueue.main.async {
                 isPriceLoading = false
                 isLoadingMore = false
-                
                 switch result {
                 case .success(let searchResult):
                     priceResults = searchResult
-                    
-                    // Determine if there might be more results
+                    itemPriceResults[item] = searchResult
                     if searchResult.items.count == 100 {
                         hasMoreResults = true
                     }
-                    
                     print("Found \(searchResult.itemCount) items for \(item) with price range: $\(String(format: "%.2f", searchResult.lowestPrice)) - $\(String(format: "%.2f", searchResult.highestPrice))")
-                    
                 case .failure(let error):
                     var errorMessage = "No price data available"
-                    
                     if let ebayError = error as? EbayError {
                         switch ebayError {
                         case .noItemsFound:
@@ -689,7 +709,6 @@ struct ContentView: View {
                     } else {
                         errorMessage = error.localizedDescription
                     }
-                    
                     priceError = errorMessage
                     print("eBay search error for \(item): \(error.localizedDescription)")
                 }
@@ -699,15 +718,7 @@ struct ContentView: View {
     
     // Load additional pages of results
     private func fetchMoreResultsForItem(_ item: String, page: Int) async {
-        let cleanedTerm = item
-            .replacingOccurrences(of: "\"", with: "")
-            .replacingOccurrences(of: """
-            , with: "")
-            .replacingOccurrences(of:
- """, with: "")
-            .replacingOccurrences(of: "'", with: "")
-            .replacingOccurrences(of: "'", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedTerm = cleanSearchTerm(item)
         
         let components = createSearchComponents(for: cleanedTerm, page: page)
         
@@ -754,6 +765,26 @@ struct ContentView: View {
                 hasMoreResults = false
             }
         }
+    }
+    
+    private func fetchQuickPriceForIdentifiedItem(_ item: String) {
+        let cleanedTerm = cleanSearchTerm(item)
+        Task {
+            let components = createSearchComponents(for: cleanedTerm, page: 1)
+            let result = await ebayService.searchWithCustomComponents(components, itemLimit: 30)
+            DispatchQueue.main.async {
+                if case .success(let searchResult) = result {
+                    itemPriceResults[item] = searchResult
+                }
+            }
+        }
+    }
+    
+    private func cleanSearchTerm(_ term: String) -> String {
+        term.replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
