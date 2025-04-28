@@ -304,10 +304,16 @@ struct ContentView: View {
                                         Text("Low: $\(String(format: "%.2f", stats.lowestPrice))")
                                             .font(.caption2)
                                             .foregroundColor(.green)
+                                        Text("Mean: $\(String(format: "%.2f", stats.averagePrice))")
+                                            .font(.caption2)
+                                            .foregroundColor(.blue)
                                         Text("High: $\(String(format: "%.2f", stats.highestPrice))")
                                             .font(.caption2)
                                             .foregroundColor(.red)
                                     }
+                                } else {
+                                    ProgressView()
+                                        .frame(width: 24, height: 24)
                                 }
                                 Image(systemName: "tag")
                                     .foregroundColor(.blue)
