@@ -609,30 +609,25 @@ struct ContentView: View {
     func extractItemsFromResponse(_ response: String) {
         // Split by new lines
         let lines = response.components(separatedBy: .newlines)
-        
         // Look for numbered or bulleted list items
         var items: [String] = []
         for line in lines {
             let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            
             // Match numbered items (1. Item) or bulleted items (• Item, - Item, * Item)
             if let match = trimmedLine.range(of: #"^(\d+\.|\•|\-|\*)\s+"#, options: .regularExpression) {
                 // Get the text after the prefix
                 let itemStart = trimmedLine.index(match.upperBound, offsetBy: 0)
                 let itemText = String(trimmedLine[itemStart...])
-                
                 if !itemText.isEmpty {
-                    items.append(itemText)
+                    items.append(cleanSearchTerm(itemText))
                 }
             }
         }
-        
         // If we couldn't find list items, try to extract product mentions
         if items.isEmpty {
             // Use a simplified approach if no list format was found
-            items = extractProductMentions(response)
+            items = extractProductMentions(response).map { cleanSearchTerm($0) }
         }
-        
         DispatchQueue.main.async {
             self.identifiedItems = items
         }
@@ -673,12 +668,26 @@ struct ContentView: View {
                 isLoadingMore = false
                 switch result {
                 case .success(let searchResult):
-                    priceResults = searchResult
-                    itemPriceResults[item] = searchResult
-                    if searchResult.items.count == 100 {
+                    let filteredItems = filterEbayItemsByTitleMatch(searchTerm: cleanedTerm, items: searchResult.items)
+                    if !filteredItems.isEmpty {
+                        let prices = filteredItems.map { $0.price }
+                        let low = prices.min() ?? 0
+                        let high = prices.max() ?? 0
+                        let mean = prices.reduce(0, +) / Double(prices.count)
+                        let filteredResult = EbaySearchResult(
+                            averagePrice: mean,
+                            lowestPrice: low,
+                            highestPrice: high,
+                            itemCount: filteredItems.count,
+                            items: filteredItems
+                        )
+                        priceResults = filteredResult
+                        itemPriceResults[item] = filteredResult
+                    }
+                    if filteredItems.count == 100 {
                         hasMoreResults = true
                     }
-                    print("Found \(searchResult.itemCount) items for \(item) with price range: $\(String(format: "%.2f", searchResult.lowestPrice)) - $\(String(format: "%.2f", searchResult.highestPrice))")
+                    print("Found \(filteredItems.count) filtered items for \(item) with price range: $\(String(format: "%.2f", filteredItems.map { $0.price }.min() ?? 0)) - $\(String(format: "%.2f", filteredItems.map { $0.price }.max() ?? 0))")
                 case .failure(let error):
                     var errorMessage = "No price data available"
                     if let ebayError = error as? EbayError {
@@ -774,7 +783,21 @@ struct ContentView: View {
             let result = await ebayService.searchWithCustomComponents(components, itemLimit: 30)
             DispatchQueue.main.async {
                 if case .success(let searchResult) = result {
-                    itemPriceResults[item] = searchResult
+                    let filteredItems = filterEbayItemsByTitleMatch(searchTerm: cleanedTerm, items: searchResult.items)
+                    if !filteredItems.isEmpty {
+                        let prices = filteredItems.map { $0.price }
+                        let low = prices.min() ?? 0
+                        let high = prices.max() ?? 0
+                        let mean = prices.reduce(0, +) / Double(prices.count)
+                        let filteredResult = EbaySearchResult(
+                            averagePrice: mean,
+                            lowestPrice: low,
+                            highestPrice: high,
+                            itemCount: filteredItems.count,
+                            items: filteredItems
+                        )
+                        itemPriceResults[item] = filteredResult
+                    }
                 }
             }
         }
@@ -785,6 +808,44 @@ struct ContentView: View {
             .replacingOccurrences(of: "*", with: "")
             .replacingOccurrences(of: "'", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private func filterEbayItemsByTitleMatch(searchTerm: String, items: [EbayItem], threshold: Double = 0.85) -> [EbayItem] {
+        let words = Set(cleanSearchTerm(searchTerm).lowercased().split(separator: " ").map { String($0) })
+        guard !words.isEmpty else { return items }
+        let now = Date()
+        let calendar = Calendar.current
+        return items.filter { item in
+            // Title match
+            let titleWords = Set(item.title.lowercased().split(separator: " ").map { String($0) })
+            let matchCount = words.filter { titleWords.contains($0) }.count
+            let ratio = Double(matchCount) / Double(words.count)
+            guard ratio >= threshold else { return false }
+            // Sold date filter (last 90 days)
+            if let soldDateStr = item.soldDate, let soldDate = parseSoldDate(soldDateStr) {
+                if let days = calendar.dateComponents([.day], from: soldDate, to: now).day, days > 90 {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+    
+    private func parseSoldDate(_ dateString: String) -> Date? {
+        let formats = [
+            "MMM d, yyyy", // e.g. "Jun 1, 2024"
+            "yyyy-MM-dd'T'HH:mm:ssZ", // ISO8601
+            "yyyy-MM-dd"
+        ]
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = format
+            if let date = formatter.date(from: dateString) {
+                return date
+            }
+        }
+        return nil
     }
 }
 
