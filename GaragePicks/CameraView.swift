@@ -1,6 +1,9 @@
 import SwiftUI
 import AVFoundation
 import PhotosUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct CameraView: View {
     @Binding var selectedImage: UIImage?
@@ -12,6 +15,7 @@ struct CameraView: View {
     @State private var cameraPreview: AVCaptureVideoPreviewLayer?
     @State private var selectedPhotos: [UIImage] = []
     @State private var selectedLibraryPhoto: UIImage? = nil
+    @State private var selectedPhotoAssets: [PHAsset] = []
     
     var body: some View {
         GeometryReader { geometry in
@@ -27,6 +31,7 @@ struct CameraView: View {
                     }
 
                     VStack {
+                        // Top bar with blur background
                         HStack {
                             Button(action: {
                                 presentationMode.wrappedValue.dismiss()
@@ -67,6 +72,12 @@ struct CameraView: View {
                             }
                         }
                         .padding(.top, 44)
+                        .background(
+                            VisualEffectBlur(blurStyle: .systemUltraThinMaterialDark)
+                                .edgesIgnoringSafeArea(.top)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.2), radius: 8, y: 2)
                         Spacer()
                         HStack {
                             Spacer()
@@ -75,51 +86,72 @@ struct CameraView: View {
                                 capturePhoto()
                             }) {
                                 Circle()
-                                    .stroke(Color.white, lineWidth: 2)
+                                    .fill(Color.white)
                                     .frame(width: 60, height: 60)
+                                    .shadow(color: Color.black.opacity(0.25), radius: 8, y: 2)
                                     .overlay(
                                         Circle()
-                                            .fill(Color.white)
-                                            .frame(width: 50, height: 50)
+                                            .stroke(Color.white, lineWidth: 2)
+                                            .frame(width: 60, height: 60)
                                     )
                             }
                             Spacer()
                         }
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 36)
                     }
                     .frame(width: geometry.size.width, height: geometry.size.width * 4/3)
                     .background(Color.clear)
                 }
                 // Photo Library
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 2) {
-                        ForEach(selectedPhotos, id: \.self) { image in
-                            ZStack(alignment: .topTrailing) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 80, height: 80)
-                                    .clipped()
-                                    .onTapGesture {
-                                        selectedLibraryPhoto = image
-                                    }
-                                if selectedLibraryPhoto == image {
-                                    Circle()
-                                        .fill(Color.blue)
-                                        .frame(width: 24, height: 24)
+                VStack(spacing: 6) {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.3))
+                        .frame(width: 40, height: 5)
+                        .padding(.top, 6)
+                    let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVGrid(columns: columns, spacing: 16) {
+                            ForEach(Array(selectedPhotos.enumerated()), id: \.offset) { idx, image in
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 110, height: 110)
+                                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                                         .overlay(
-                                            Image(systemName: "checkmark")
-                                                .foregroundColor(.white)
-                                                .font(.system(size: 14, weight: .bold))
+                                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                                .stroke(selectedLibraryPhoto == image ? Color.blue : Color.clear, lineWidth: 4)
                                         )
-                                        .padding(6)
+                                        .shadow(color: selectedLibraryPhoto == image ? Color.blue.opacity(0.2) : Color.black.opacity(0.1), radius: 8, y: 2)
+                                        .onTapGesture {
+                                            fetchFullSizeImage(for: selectedPhotoAssets[idx])
+                                        }
+                                    if selectedLibraryPhoto == image {
+                                        Circle()
+                                            .fill(Color.blue)
+                                            .frame(width: 28, height: 28)
+                                            .overlay(
+                                                Image(systemName: "checkmark")
+                                                    .foregroundColor(.white)
+                                                    .font(.system(size: 16, weight: .bold))
+                                            )
+                                            .padding(8)
+                                    }
                                 }
                             }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
                     }
                 }
-                .frame(height: 80)
-                .background(Color.black)
+                .frame(height: 370)
+                .background(
+                    VisualEffectBlur(blurStyle: .systemUltraThinMaterialDark)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.2), radius: 8, y: -2)
+                )
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
             }
             .edgesIgnoringSafeArea(.all)
         }
@@ -191,7 +223,7 @@ struct CameraView: View {
     private func loadPhotos() {
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.fetchLimit = 10
+        fetchOptions.fetchLimit = 30
         
         let fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
         
@@ -200,12 +232,37 @@ struct CameraView: View {
         requestOptions.isSynchronous = false
         requestOptions.deliveryMode = .highQualityFormat
         
+        var tempImages: [UIImage] = []
+        var tempAssets: [PHAsset] = []
         fetchResult.enumerateObjects { (asset, _, _) in
             imageManager.requestImage(for: asset, targetSize: CGSize(width: 200, height: 200), contentMode: .aspectFill, options: requestOptions) { image, _ in
                 if let image = image {
                     DispatchQueue.main.async {
-                        selectedPhotos.append(image)
+                        tempImages.append(image)
+                        tempAssets.append(asset)
+                        if tempImages.count == fetchResult.count {
+                            selectedPhotos = tempImages
+                            selectedPhotoAssets = tempAssets
+                        }
                     }
+                }
+            }
+        }
+    }
+    
+    private func fetchFullSizeImage(for asset: PHAsset) {
+        let imageManager = PHImageManager.default()
+        let options = PHImageRequestOptions()
+        options.isSynchronous = false
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .none
+        options.isNetworkAccessAllowed = true
+        let targetSize = CGSize(width: asset.pixelWidth, height: asset.pixelHeight)
+        imageManager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { image, _ in
+            if let image = image {
+                DispatchQueue.main.async {
+                    selectedLibraryPhoto = image
+                    selectedImage = image
                 }
             }
         }
@@ -223,4 +280,13 @@ struct CameraPreviewView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UIView, context: Context) {}
+}
+
+// VisualEffectBlur for SwiftUI
+struct VisualEffectBlur: UIViewRepresentable {
+    var blurStyle: UIBlurEffect.Style
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        return UIVisualEffectView(effect: UIBlurEffect(style: blurStyle))
+    }
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
 } 

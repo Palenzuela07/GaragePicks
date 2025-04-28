@@ -10,6 +10,10 @@ import PhotosUI
 import UIKit
 import WebKit
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 struct ContentView: View {
     @State private var selectedImage: UIImage?
     @State private var isImagePickerPresented = false
@@ -105,7 +109,7 @@ struct ContentView: View {
     }
     
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
             // Tab buttons at top - add pricing tab
             HStack {
                 TabButton(title: "Image", isActive: activeTab == 0) {
@@ -122,14 +126,53 @@ struct ContentView: View {
             }
             .padding(.horizontal)
             
-            // Main content area
-            ScrollView {
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    if activeTab == 0 {
+                        imageTabContent
+                    } else if activeTab == 1 {
+                        analysisTabContent
+                    } else {
+                        pricingTabContent
+                    }
+                }
                 if activeTab == 0 {
-                    imageTabContent
-                } else if activeTab == 1 {
-                    analysisTabContent
-                } else {
-                    pricingTabContent
+                    HStack(spacing: 20) {
+                        Button(action: {
+                            isCameraPresented = true
+                        }) {
+                            HStack {
+                                Image(systemName: "camera")
+                                    .font(.title2)
+                                Text("Take or Choose Photo")
+                                    .font(.headline)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                        }
+                        
+                        Button(action: {
+                            analyzePhoto()
+                        }) {
+                            HStack {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.title2)
+                                Text(isAnalyzing ? "Analyzing..." : "Analyze")
+                                    .font(.headline)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(selectedImage == nil ? Color.gray : Color.green)
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                        }
+                        .disabled(selectedImage == nil || isAnalyzing)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 24)
                 }
             }
         }
@@ -167,6 +210,7 @@ struct ContentView: View {
     
     var imageTabContent: some View {
         VStack(spacing: 20) {
+            Spacer()
             if let image = selectedImage {
                 Image(uiImage: image)
                     .resizable()
@@ -180,44 +224,9 @@ struct ContentView: View {
                     .foregroundColor(.gray)
                     .frame(height: 300)
             }
-            
-            HStack(spacing: 20) {
-                Button(action: {
-                    isCameraPresented = true
-                }) {
-                    HStack {
-                        Image(systemName: "camera")
-                            .font(.title2)
-                        Text("Take or Choose Photo")
-                            .font(.headline)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-                }
-                
-                Button(action: {
-                    analyzePhoto()
-                }) {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .font(.title2)
-                        Text(isAnalyzing ? "Analyzing..." : "Analyze")
-                            .font(.headline)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(selectedImage == nil ? Color.gray : Color.green)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-                }
-                .disabled(selectedImage == nil || isAnalyzing)
-            }
-            .padding(.horizontal)
+            Spacer()
         }
-        .padding()
+        .frame(maxHeight: .infinity)
     }
     
     var analysisTabContent: some View {
