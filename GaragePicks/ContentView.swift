@@ -17,15 +17,14 @@ import UIKit
 
 struct ContentView: View {
     @State private var selectedImages: [UIImage] = []
-    @State private var isImagePickerPresented = false
-    @State private var isCameraPresented = false
+    @State private var isPhotoLibraryPresented = false
     @State private var analysisResults: String = ""
     @State private var isAnalyzing: Bool = false
     @State private var identifiedItems: [String] = []
     @State private var itemPriceResults: [String: EbaySearchResult] = [:]
     @State private var itemImageURLs: [String: String] = [:]
     @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
-    @State private var isSortedByPrice: Bool = false // New state for sorting
+    @State private var isSortedByPrice: Bool = false
     @State private var showPhotoLimitAlert: Bool = false
     
     // Pricing-related state
@@ -33,7 +32,7 @@ struct ContentView: View {
     @State private var priceResults: EbaySearchResult? = nil
     @State private var isPriceLoading: Bool = false
     @State private var priceError: String? = nil
-    @State private var displayedListingCount: Int = 10 // Initial number of listings to show
+    @State private var displayedListingCount: Int = 10
     @State private var isLoadingMore: Bool = false
     @State private var hasMoreResults: Bool = false
     @State private var currentPage: Int = 1
@@ -152,10 +151,7 @@ struct ContentView: View {
                 alignment: .top
             )
         }
-        .sheet(isPresented: $isImagePickerPresented) {
-            ImagePicker(selectedImages: $selectedImages, sourceType: .photoLibrary)
-        }
-        .fullScreenCover(isPresented: $isCameraPresented) {
+        .sheet(isPresented: $isPhotoLibraryPresented) {
             CameraView(selectedImages: $selectedImages)
         }
         .sheet(isPresented: $isWebViewPresented) {
@@ -164,6 +160,9 @@ struct ContentView: View {
                     isWebViewPresented = false 
                 })
             }
+        }
+        .onChange(of: selectedImages) { newImages in
+            print("Selected images changed. Count: \(newImages.count)")
         }
         .onChange(of: identifiedItems) { newItems in
             // When items are identified, switch to the analysis tab
@@ -257,16 +256,21 @@ struct ContentView: View {
             
             HStack(spacing: 20) {
                 Button(action: {
-                    isCameraPresented = true
+                    if selectedImages.count < maxPhotos {
+                        isPhotoLibraryPresented = true
+                    } else {
+                        showPhotoLimitAlert = true
+                    }
                 }) {
-                    Image(systemName: "camera")
+                    Image(systemName: "photo.on.rectangle")
                         .font(.title2)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.blue)
+                        .background(Color.accentColor)
                         .foregroundColor(.white)
                         .cornerRadius(12)
                 }
+                .disabled(selectedImages.count >= maxPhotos)
                 
                 Button(action: {
                     analyzePhoto()
@@ -285,7 +289,7 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(selectedImages.isEmpty ? Color.gray : Color.green)
+                    .background(selectedImages.isEmpty ? Color(.systemGray4) : Color.green)
                     .foregroundColor(.white)
                     .cornerRadius(12)
                 }
@@ -324,21 +328,21 @@ struct ContentView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(selectedImages, id: \.self) { image in
-                Image(uiImage: image)
-                    .resizable()
+                            Image(uiImage: image)
+                                .resizable()
                                 .scaledToFill()
                                 .frame(width: 100, height: 100)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                                        .stroke(Color(.systemGray4), lineWidth: 1)
                                 )
                         }
                     }
                     .padding(.horizontal)
                 }
                 .frame(height: 120)
-                .background(Color(.systemGray6).opacity(0.3))
+                .background(Color(.systemGray6))
                 .cornerRadius(12)
                 .padding(.horizontal)
             }
@@ -1058,14 +1062,31 @@ struct ContentView: View {
         
         let meanPrice = stats.averagePrice
         
-        if meanPrice <= 14 {
-            return Color(.systemGray6)
-        } else if meanPrice <= 39 {
-            return Color.blue.opacity(0.2)
-        } else if meanPrice <= 80 {
-            return Color.purple.opacity(0.2)
+        // Check if we're in dark mode
+        let isDarkMode = UITraitCollection.current.userInterfaceStyle == .dark
+        
+        if isDarkMode {
+            // Dark mode colors with better contrast
+            if meanPrice <= 14 {
+                return Color(.systemGray6)
+            } else if meanPrice <= 39 {
+                return Color.blue.opacity(0.3)
+            } else if meanPrice <= 80 {
+                return Color.purple.opacity(0.3)
+            } else {
+                return Color.yellow.opacity(0.3)
+            }
         } else {
-            return Color.yellow.opacity(0.2)
+            // Light mode colors (unchanged)
+            if meanPrice <= 14 {
+                return Color(.systemGray6)
+            } else if meanPrice <= 39 {
+                return Color.blue.opacity(0.2)
+            } else if meanPrice <= 80 {
+                return Color.purple.opacity(0.2)
+            } else {
+                return Color.yellow.opacity(0.2)
+            }
         }
     }
 }
