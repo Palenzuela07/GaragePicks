@@ -431,7 +431,7 @@ struct ContentView: View {
                             }
                             .padding(.vertical, 8)
                             .padding(.horizontal)
-                            .background(Color(.systemGray6))
+                            .background(getBackgroundColor(for: item))
                             .cornerRadius(8)
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -1025,6 +1025,23 @@ struct ContentView: View {
         } else {
             // Sort alphabetically
             identifiedItems.sort()
+        }
+    }
+
+    // Add this helper function to determine the background color
+    private func getBackgroundColor(for item: String) -> Color {
+        guard let stats = itemPriceResults[item] else { return Color(.systemGray6) }
+        
+        let meanPrice = stats.averagePrice
+        
+        if meanPrice <= 14 {
+            return Color(.systemGray6)
+        } else if meanPrice <= 39 {
+            return Color.blue.opacity(0.2)
+        } else if meanPrice <= 80 {
+            return Color.purple.opacity(0.2)
+        } else {
+            return Color.yellow.opacity(0.2)
         }
     }
 }
