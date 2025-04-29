@@ -201,28 +201,48 @@ struct ContentView: View {
             Spacer(minLength: 40)
             if !selectedImages.isEmpty {
                 ScrollView {
-                    let columns = [
-                        GridItem(.flexible(), spacing: 16),
-                        GridItem(.flexible(), spacing: 16)
-                    ]
-                    LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(selectedImages, id: \.self) { image in
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                                .frame(height: 200)
+                    if selectedImages.count == 1 {
+                        // Center single image
+                        VStack {
+                            Image(uiImage: selectedImages[0])
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 300)
                                 .frame(maxWidth: .infinity)
                                 .background(Color(.systemGray6))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                                        .stroke(Color(.systemGray4), lineWidth: 1)
                                 )
                                 .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                                .padding(.horizontal)
                         }
+                    } else {
+                        // Grid layout for multiple images
+                        let columns = [
+                            GridItem(.flexible(), spacing: 16),
+                            GridItem(.flexible(), spacing: 16)
+                        ]
+                        LazyVGrid(columns: columns, spacing: 16) {
+                            ForEach(selectedImages, id: \.self) { image in
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(height: 200)
+                                    .frame(maxWidth: .infinity)
+                                    .background(Color(.systemGray6))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color(.systemGray4), lineWidth: 1)
+                                    )
+                                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
                 }
                 .background(Color(.systemGray6).opacity(0.3))
                 .cornerRadius(16)
