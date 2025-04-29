@@ -272,9 +272,15 @@ struct ContentView: View {
                     analyzePhoto()
                 }) {
                     HStack {
-                        Image(systemName: "magnifyingglass")
-                            .font(.title2)
-                        Text(isAnalyzing ? "Analyzing..." : "Analyze")
+                        if isAnalyzing {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "magnifyingglass")
+                                .font(.title2)
+                        }
+                        Text(isAnalyzing ? "Analyzing" : "Analyze")
                             .font(.headline)
                     }
                     .frame(maxWidth: .infinity)
