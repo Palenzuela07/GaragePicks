@@ -468,32 +468,30 @@ struct ContentView: View {
     
     var pricingTabContent: some View {
         VStack(alignment: .center, spacing: 20) {
-            Text("eBay")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                .padding(.top)
+            HStack {
+                Text("eBay")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button(action: {
+                    openEbayWebViewForItem("")
+                }) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.title2)
+                        .foregroundColor(.blue)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top)
             
             if let selectedItem = selectedItemForPricing {
-                // Header with item name
-                HStack {
-                    Button(action: {
-                        activeTab = 1 // Go back to analysis tab
-                    }) {
-                        Image(systemName: "arrow.left")
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.trailing, 8)
-                    
-                    Text(selectedItem)
-                        .font(.headline)
-                        .lineLimit(1)
-                    
-                    Spacer()
-                }
-                .padding(.horizontal)
-                .padding(.top, 8)
+                // Remove the old header with item name since we have the back button now
+                Text(selectedItem)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .padding(.horizontal)
                 
                 // Side-by-side buttons
                 HStack(spacing: 16) {
@@ -1140,8 +1138,7 @@ struct EbayWebView: View {
     var body: some View {
         NavigationView {
             WebViewContainer(url: url)
-                .edgesIgnoringSafeArea(.bottom)
-                .navigationBarTitle("eBay Search", displayMode: .inline)
+                .navigationBarTitle("eBay", displayMode: .inline)
                 .navigationBarItems(trailing: Button("Done") {
                     onDismiss()
                 })
@@ -1155,12 +1152,14 @@ struct WebViewContainer: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
         webView.navigationDelegate = context.coordinator
-        webView.load(URLRequest(url: url))
+        let request = URLRequest(url: url)
+        webView.load(request)
         return webView
     }
     
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        // No updates needed
+        let request = URLRequest(url: url)
+        uiView.load(request)
     }
     
     func makeCoordinator() -> Coordinator {
@@ -1175,7 +1174,7 @@ struct WebViewContainer: UIViewRepresentable {
         }
         
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Page loaded successfully
+            print("WebView finished loading")
         }
         
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
