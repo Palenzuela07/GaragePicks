@@ -62,20 +62,20 @@ struct CameraView: View {
                                         .background(Color.black.opacity(0.5))
                                         .cornerRadius(12)
                                     
-                                    Button(action: {
+                                Button(action: {
                                         selectedImages = selectedPhotos + selectedLibraryPhotos
                                         presentationMode.wrappedValue.dismiss()
-                                    }) {
-                                        HStack(spacing: 4) {
+                                }) {
+                                    HStack(spacing: 4) {
                                             Text("Done")
-                                                .font(.headline)
+                                            .font(.headline)
                                             Image(systemName: "checkmark.circle.fill")
-                                                .foregroundColor(.blue)
-                                        }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(Color.white.opacity(0.9))
-                                        .cornerRadius(16)
+                                            .foregroundColor(.blue)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.white.opacity(0.9))
+                                    .cornerRadius(16)
                                     }
                                 }
                                 .padding(.trailing, 8)
@@ -364,13 +364,13 @@ struct CameraView: View {
         let totalSelectedCount = selectedPhotos.count + selectedLibraryPhotos.count
         if totalSelectedCount < maxPhotos {
             let manager = PHImageManager.default()
-            let options = PHImageRequestOptions()
+        let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
-            options.isSynchronous = false
+        options.isSynchronous = false
             
             manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: options) { image, _ in
-                if let image = image {
-                    DispatchQueue.main.async {
+            if let image = image {
+                DispatchQueue.main.async {
                         selectedLibraryPhotos.append(image)
                     }
                 }

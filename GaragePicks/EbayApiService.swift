@@ -673,8 +673,8 @@ class EbayApiService {
         }
         
         return .failure(EbayError.noItemsFound)
-    }
-
+        }
+        
     private func scrapeEbaySoldItemsWeb(term: String) async -> EbaySearchResult? {
         let urlString = "https://www.ebay.com/sch/i.html?_nkw=\(term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Complete=1&LH_Sold=1&_sop=10"
         guard let url = URL(string: urlString) else { return nil }

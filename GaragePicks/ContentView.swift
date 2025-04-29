@@ -116,7 +116,19 @@ struct ContentView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Tab buttons at top - add pricing tab
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    if activeTab == 0 {
+                        imageTabContent
+                    } else if activeTab == 1 {
+                        analysisTabContent
+                    } else {
+                        pricingTabContent
+                    }
+                }
+            }
+            
+            // Tab buttons at bottom
             HStack {
                 TabButton(title: "Image", isActive: activeTab == 0) {
                     activeTab = 0
@@ -131,18 +143,14 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal)
-            
-            ZStack(alignment: .bottom) {
-                ScrollView {
-                    if activeTab == 0 {
-                        imageTabContent
-                    } else if activeTab == 1 {
-                        analysisTabContent
-                    } else {
-                        pricingTabContent
-                    }
-                }
-            }
+            .padding(.vertical, 8)
+            .background(Color(.systemBackground))
+            .overlay(
+                Rectangle()
+                    .frame(height: 1)
+                    .foregroundColor(Color(.systemGray4)),
+                alignment: .top
+            )
         }
         .sheet(isPresented: $isImagePickerPresented) {
             ImagePicker(selectedImages: $selectedImages, sourceType: .photoLibrary)
@@ -184,6 +192,13 @@ struct ContentView: View {
     
     var imageTabContent: some View {
         VStack(spacing: 24) {
+            Text("Photos")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.top)
+            
             Spacer(minLength: 40)
             if !selectedImages.isEmpty {
                 ScrollView {
@@ -193,9 +208,9 @@ struct ContentView: View {
                     ]
                     LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(selectedImages, id: \.self) { image in
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
                                 .frame(height: 200)
                                 .frame(maxWidth: .infinity)
                                 .background(Color(.systemGray6))
@@ -220,10 +235,10 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
             } else {
                 VStack(spacing: 16) {
-                    Image(systemName: "photo")
-                        .imageScale(.large)
-                        .font(.system(size: 100))
-                        .foregroundColor(.gray)
+                Image(systemName: "photo")
+                    .imageScale(.large)
+                    .font(.system(size: 100))
+                    .foregroundColor(.gray)
                         .frame(height: 200)
                     
                     Text("No photos selected")
@@ -238,17 +253,13 @@ struct ContentView: View {
                 Button(action: {
                     isCameraPresented = true
                 }) {
-                    HStack {
-                        Image(systemName: "camera")
-                            .font(.title2)
-                        Text("Take Photo")
-                            .font(.headline)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
+                    Image(systemName: "camera")
+                        .font(.title2)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
                 }
                 
                 Button(action: {
@@ -281,13 +292,20 @@ struct ContentView: View {
     
     var analysisTabContent: some View {
         VStack(spacing: 16) {
+            Text("Analysis")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.top)
+            
             // Show selected photos at the top
             if !selectedImages.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(selectedImages, id: \.self) { image in
-                            Image(uiImage: image)
-                                .resizable()
+                Image(uiImage: image)
+                    .resizable()
                                 .scaledToFill()
                                 .frame(width: 100, height: 100)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -351,8 +369,8 @@ struct ContentView: View {
             if !identifiedItems.isEmpty {
                 VStack(alignment: .leading) {
                     HStack {
-                        Text("Identified Items (tap to search eBay):")
-                            .font(.headline)
+                    Text("Identified Items (tap to search eBay):")
+                        .font(.headline)
                         Spacer()
                         Button(action: {
                             isSortedByPrice.toggle()
@@ -370,7 +388,7 @@ struct ContentView: View {
                             .cornerRadius(8)
                         }
                     }
-                    .padding(.horizontal)
+                        .padding(.horizontal)
                     
                     ForEach(identifiedItems, id: \.self) { item in
                         Button(action: {
@@ -450,6 +468,13 @@ struct ContentView: View {
     
     var pricingTabContent: some View {
         VStack(alignment: .center, spacing: 20) {
+            Text("eBay")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.top)
+            
             if let selectedItem = selectedItemForPricing {
                 // Header with item name
                 HStack {
@@ -591,8 +616,8 @@ struct ContentView: View {
         
         // Create a single user message with all images
         var content: [[String: Any]] = [
-            [
-                "type": "text",
+                    [
+                        "type": "text",
                 "text": "Here are multiple images. Please analyze ALL of them together and provide a single comprehensive list of ONLY the product names found across these images. List ONLY the specific product names as they would appear in an eBay search. Do not include any additional descriptions or context."
             ]
         ]
@@ -600,10 +625,10 @@ struct ContentView: View {
         // Add all images to the content array
         for base64Image in base64Images {
             content.append([
-                "type": "image_url",
-                "image_url": [
-                    "url": "data:image/jpeg;base64,\(base64Image)"
-                ]
+                        "type": "image_url",
+                        "image_url": [
+                            "url": "data:image/jpeg;base64,\(base64Image)"
+                        ]
             ])
         }
         
