@@ -543,6 +543,8 @@ struct ContentView: View {
         .padding(.vertical)
     }
     
+    // MARK: - Helper Methods
+    
     // Open eBay WebView for a specific item
     private func openEbayWebViewForItem(_ item: String) {
         // Clean the search term
@@ -555,27 +557,6 @@ struct ContentView: View {
         webViewURL = createEbayWebUrlForSoldItems(cleanedTerm)
         isWebViewPresented = true
         activeTab = 2
-    }
-    
-    // MARK: - Helper Methods
-    
-    // Load more items from the current results
-    private func loadMoreItems() {
-        // Increase the number of displayed items
-        let newCount = min(displayedListingCount + 10, priceResults?.items.count ?? 0)
-        displayedListingCount = newCount
-    }
-    
-    // Load the next page of results from eBay
-    private func loadNextPage() {
-        guard let selectedItem = selectedItemForPricing, !isLoadingMore else { return }
-        
-        isLoadingMore = true
-        currentPage += 1
-        
-        Task {
-            await fetchMoreResultsForItem(selectedItem, page: currentPage)
-        }
     }
     
     // MARK: - Existing Methods
@@ -1028,7 +1009,7 @@ struct ContentView: View {
         }
     }
 
-    // Add this helper function to determine the background color
+    // Helper function to determine the background color
     private func getBackgroundColor(for item: String) -> Color {
         guard let stats = itemPriceResults[item] else { return Color(.systemGray6) }
         
