@@ -8,6 +8,7 @@ import UIKit
 struct CameraView: View {
     @Binding var selectedImages: [UIImage]
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.dismiss) private var dismiss
     @State private var isCameraAuthorized = false
     @State private var isPhotoLibraryAuthorized = false
     @State private var showPhotoLibrary = false
@@ -20,6 +21,11 @@ struct CameraView: View {
     @State private var photoOutput: AVCapturePhotoOutput?
     @State private var libraryPhotos: [UIImage] = []
     @State private var libraryAssets: [PHAsset] = []
+    @State private var capturedImage: UIImage?
+    @State private var isShowingImagePicker = false
+    @State private var showPhotoLimitAlert = false
+    
+    private let maxPhotos = 6
     
     var body: some View {
         GeometryReader { geometry in
@@ -47,20 +53,30 @@ struct CameraView: View {
                             }
                             Spacer()
                             if !selectedPhotos.isEmpty || !selectedLibraryPhotos.isEmpty {
-                                Button(action: {
-                                    selectedImages = selectedPhotos + selectedLibraryPhotos
-                                    presentationMode.wrappedValue.dismiss()
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Text("Done")
-                                            .font(.headline)
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.blue)
+                                HStack(spacing: 8) {
+                                    Text("\(selectedPhotos.count + selectedLibraryPhotos.count)/\(maxPhotos)")
+                                        .font(.headline)
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.black.opacity(0.5))
+                                        .cornerRadius(12)
+                                    
+                                    Button(action: {
+                                        selectedImages = selectedPhotos + selectedLibraryPhotos
+                                        presentationMode.wrappedValue.dismiss()
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Text("Done")
+                                                .font(.headline)
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.blue)
+                                        }
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(Color.white.opacity(0.9))
+                                        .cornerRadius(16)
                                     }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(Color.white.opacity(0.9))
-                                    .cornerRadius(16)
                                 }
                                 .padding(.trailing, 8)
                             }
@@ -80,26 +96,73 @@ struct CameraView: View {
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .shadow(color: Color.black.opacity(0.2), radius: 8, y: 2)
+                        
+                        // Show selected photos in a horizontal scroll view
+                        if !selectedPhotos.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(Array(selectedPhotos.enumerated()), id: \.offset) { index, photo in
+                                        ZStack(alignment: .topTrailing) {
+                                            Image(uiImage: photo)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 60, height: 60)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            Button(action: {
+                                                removeCapturedPhoto(at: index)
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.white)
+                                                    .background(Color.black.opacity(0.5))
+                                                    .clipShape(Circle())
+                                            }
+                                            .padding(4)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                            .frame(height: 70)
+                        }
+                        
                         Spacer()
-                        HStack {
-                            Spacer()
+                        HStack(spacing: 20) {
                             Button(action: {
-                                // Take photo
+                                isShowingImagePicker = true
+                            }) {
+                                Image(systemName: "photo.on.rectangle")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(.white)
+                                    .frame(width: 50, height: 50)
+                                    .background(Color.black.opacity(0.5))
+                                    .clipShape(Circle())
+                            }
+                            
+                            Button(action: {
                                 capturePhoto()
                             }) {
                                 Circle()
-                                    .fill(Color.white)
-                                    .frame(width: 60, height: 60)
-                                    .shadow(color: Color.black.opacity(0.25), radius: 8, y: 2)
+                                    .stroke(Color.white, lineWidth: 3)
+                                    .frame(width: 70, height: 70)
                                     .overlay(
                                         Circle()
-                                            .stroke(Color.white, lineWidth: 2)
+                                            .fill(Color.white)
                                             .frame(width: 60, height: 60)
                                     )
                             }
-                            Spacer()
+                            
+                            Button(action: {
+                                dismiss()
+                            }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(.white)
+                                    .frame(width: 50, height: 50)
+                                    .background(Color.black.opacity(0.5))
+                                    .clipShape(Circle())
+                            }
                         }
-                        .padding(.bottom, 36)
+                        .padding(.bottom, 30)
                     }
                     .frame(width: geometry.size.width, height: geometry.size.width * 4/3)
                     .background(Color.clear)
@@ -125,9 +188,6 @@ struct CameraView: View {
                                                 .stroke(selectedLibraryAssets.contains(libraryAssets[idx]) ? Color.blue : Color.clear, lineWidth: 4)
                                         )
                                         .shadow(color: selectedLibraryAssets.contains(libraryAssets[idx]) ? Color.blue.opacity(0.2) : Color.black.opacity(0.1), radius: 8, y: 2)
-                                        .onTapGesture {
-                                            toggleAssetSelection(libraryAssets[idx])
-                                        }
                                     if selectedLibraryAssets.contains(libraryAssets[idx]) {
                                         Circle()
                                             .fill(Color.blue)
@@ -139,6 +199,10 @@ struct CameraView: View {
                                             )
                                             .padding(8)
                                     }
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    toggleAssetSelection(libraryAssets[idx])
                                 }
                             }
                         }
@@ -161,6 +225,9 @@ struct CameraView: View {
             checkCameraAuthorization()
             checkPhotoLibraryAuthorization()
             setupCamera()
+        }
+        .sheet(isPresented: $isShowingImagePicker) {
+            ImagePicker(selectedImages: $selectedImages, sourceType: .photoLibrary)
         }
     }
     
@@ -225,24 +292,27 @@ struct CameraView: View {
     }
     
     private func capturePhoto() {
-        guard let output = photoOutput else { return }
-        
-        let settings = AVCapturePhotoSettings()
-        output.capturePhoto(with: settings, delegate: PhotoCaptureDelegate { image in
-            if let image = image {
-                DispatchQueue.main.async {
-                    selectedPhotos.append(image)
-                    // Create a PHAsset for the captured photo
-                    let fetchOptions = PHFetchOptions()
-                    fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-                    fetchOptions.fetchLimit = 1
-                    
-                    if let asset = PHAsset.fetchAssets(with: .image, options: fetchOptions).firstObject {
-                        selectedPhotoAssets.append(asset)
+        let totalSelectedCount = selectedPhotos.count + selectedLibraryPhotos.count
+        if totalSelectedCount < maxPhotos {
+            guard let output = photoOutput else { return }
+            
+            let settings = AVCapturePhotoSettings()
+            output.capturePhoto(with: settings, delegate: PhotoCaptureDelegate { image in
+                if let image = image {
+                    DispatchQueue.main.async {
+                        selectedPhotos.append(image)
+                        // Create a PHAsset for the captured photo
+                        let fetchOptions = PHFetchOptions()
+                        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+                        fetchOptions.fetchLimit = 1
+                        
+                        if let asset = PHAsset.fetchAssets(with: .image, options: fetchOptions).firstObject {
+                            selectedPhotoAssets.append(asset)
+                        }
                     }
                 }
-            }
-        })
+            })
+        }
     }
     
     private func loadPhotos() {
@@ -282,22 +352,38 @@ struct CameraView: View {
                 selectedLibraryPhotos.remove(at: index)
             }
         } else {
-            selectedLibraryAssets.insert(asset)
-            fetchFullSizeImage(for: asset)
+            let totalSelectedCount = selectedPhotos.count + selectedLibraryPhotos.count
+            if totalSelectedCount < maxPhotos {
+                selectedLibraryAssets.insert(asset)
+                fetchFullSizeImage(for: asset)
+            }
         }
     }
     
     private func fetchFullSizeImage(for asset: PHAsset) {
-        let manager = PHImageManager.default()
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.isSynchronous = false
-        
-        manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: options) { image, _ in
-            if let image = image {
-                DispatchQueue.main.async {
-                    selectedLibraryPhotos.append(image)
+        let totalSelectedCount = selectedPhotos.count + selectedLibraryPhotos.count
+        if totalSelectedCount < maxPhotos {
+            let manager = PHImageManager.default()
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.isSynchronous = false
+            
+            manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: options) { image, _ in
+                if let image = image {
+                    DispatchQueue.main.async {
+                        selectedLibraryPhotos.append(image)
+                    }
                 }
+            }
+        }
+    }
+    
+    // Add a function to remove a captured photo
+    private func removeCapturedPhoto(at index: Int) {
+        if index < selectedPhotos.count {
+            selectedPhotos.remove(at: index)
+            if index < selectedPhotoAssets.count {
+                selectedPhotoAssets.remove(at: index)
             }
         }
     }

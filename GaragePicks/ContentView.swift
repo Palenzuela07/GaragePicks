@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var itemImageURLs: [String: String] = [:]
     @State private var activeTab: Int = 0 // 0 = Image, 1 = Results, 2 = Pricing
     @State private var isSortedByPrice: Bool = false // New state for sorting
+    @State private var showPhotoLimitAlert: Bool = false
     
     // Pricing-related state
     @State private var selectedItemForPricing: String? = nil
@@ -40,6 +41,7 @@ struct ContentView: View {
     @State private var webViewURL: URL? = nil
     
     private let ebayService = EbayApiService()
+    private let maxPhotos = 6
     
     // MARK: - eBay Deep Link Helpers
     
@@ -185,13 +187,18 @@ struct ContentView: View {
             Spacer(minLength: 40)
             if !selectedImages.isEmpty {
                 ScrollView {
-                    let columns = [GridItem(.flexible()), GridItem(.flexible())]
-                    LazyVGrid(columns: columns, spacing: 20) {
+                    let columns = [
+                        GridItem(.flexible(), spacing: 16),
+                        GridItem(.flexible(), spacing: 16)
+                    ]
+                    LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(selectedImages, id: \.self) { image in
                             Image(uiImage: image)
                                 .resizable()
-                                .scaledToFill()
+                                .scaledToFit()
                                 .frame(height: 200)
+                                .frame(maxWidth: .infinity)
+                                .background(Color(.systemGray6))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
@@ -206,6 +213,11 @@ struct ContentView: View {
                 .background(Color(.systemGray6).opacity(0.3))
                 .cornerRadius(16)
                 .padding(.horizontal)
+                
+                // Show photo count
+                Text("\(selectedImages.count)/\(maxPhotos) photos selected")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "photo")
@@ -238,6 +250,7 @@ struct ContentView: View {
                     .foregroundColor(.white)
                     .cornerRadius(12)
                 }
+                
                 Button(action: {
                     analyzePhoto()
                 }) {
@@ -259,6 +272,11 @@ struct ContentView: View {
             .padding(.bottom, 20)
         }
         .frame(maxHeight: .infinity)
+        .alert("Photo Limit Reached", isPresented: $showPhotoLimitAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("You can only analyze up to \(maxPhotos) photos at once.")
+        }
     }
     
     var analysisTabContent: some View {
