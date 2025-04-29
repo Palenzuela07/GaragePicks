@@ -244,6 +244,12 @@ struct ContentView: View {
                     Text("No photos selected")
                         .foregroundColor(.gray)
                         .font(.headline)
+                    
+                    Text("Take photos or select from your library to analyze items. You can add up to 6 photos at once.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
                 }
             }
             
@@ -298,6 +304,14 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
                 .padding(.top)
+            
+            if !isAnalyzing && identifiedItems.isEmpty {
+                Text("Have your photos analyzed for individual products. Analyzed products will show quick data and a link to its eBay search.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal)
+            }
             
             // Show selected photos at the top
             if !selectedImages.isEmpty {
