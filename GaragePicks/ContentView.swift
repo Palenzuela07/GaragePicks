@@ -1136,16 +1136,28 @@ struct TabButton: View {
     let isActive: Bool
     let action: () -> Void
     
+    var iconName: String {
+        switch title {
+        case "Image": return "photo"
+        case "Analysis": return "magnifyingglass"
+        case "eBay": return "tag"
+        default: return "circle"
+        }
+    }
+    
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .fontWeight(isActive ? .bold : .regular)
-                .padding(.vertical, 8)
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity)
-                .background(isActive ? Color.blue : Color(.systemGray5))
-                .foregroundColor(isActive ? .white : .primary)
-                .cornerRadius(8)
+            VStack(spacing: 4) {
+                Image(systemName: iconName)
+                    .font(.system(size: 22))
+                    .foregroundColor(isActive ? .blue : .primary)
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(isActive ? .blue : .primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .cornerRadius(8)
         }
     }
 }
