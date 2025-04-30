@@ -24,82 +24,82 @@ struct CameraView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                // Top bar with blur background
-                HStack {
-                    Button(action: {
-                        presentationMode.wrappedValue.dismiss()
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.title2)
-                            .foregroundColor(.primary)
-                            .padding()
-                    }
-                    Spacer()
-                    if !selectedPhotos.isEmpty || !selectedLibraryPhotos.isEmpty {
-                        HStack(spacing: 8) {
-                            Text("\(selectedPhotos.count + selectedLibraryPhotos.count)/\(maxPhotos)")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color(.systemGray6))
-                                .cornerRadius(12)
-                            
+                        // Top bar with blur background
+                        HStack {
                             Button(action: {
-                                selectedImages = selectedPhotos + selectedLibraryPhotos
                                 presentationMode.wrappedValue.dismiss()
                             }) {
-                                HStack(spacing: 4) {
-                                    Text("Done")
+                                Image(systemName: "xmark")
+                                    .font(.title2)
+                            .foregroundColor(.primary)
+                                    .padding()
+                            }
+                            Spacer()
+                            if !selectedPhotos.isEmpty || !selectedLibraryPhotos.isEmpty {
+                                HStack(spacing: 8) {
+                                    Text("\(selectedPhotos.count + selectedLibraryPhotos.count)/\(maxPhotos)")
                                         .font(.headline)
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.blue)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(Color(.systemBackground))
-                                .cornerRadius(16)
-                            }
-                        }
-                        .padding(.trailing, 8)
-                    }
-                }
-                .padding(.top, 44)
-                .background(
-                    VisualEffectBlur(blurStyle: .systemMaterial)
-                        .edgesIgnoringSafeArea(.top)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .shadow(color: Color(.systemGray4), radius: 8, y: 2)
-                
-                // Show selected photos in a horizontal scroll view
-                if !selectedPhotos.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(Array(selectedPhotos.enumerated()), id: \.offset) { index, photo in
-                                ZStack(alignment: .topTrailing) {
-                                    Image(uiImage: photo)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 60, height: 60)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    Button(action: {
-                                        removeCapturedPhoto(at: index)
-                                    }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.white)
-                                            .background(Color.black.opacity(0.5))
-                                            .clipShape(Circle())
+                                .foregroundColor(.primary)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                .background(Color(.systemGray6))
+                                        .cornerRadius(12)
+                                    
+                                Button(action: {
+                                        selectedImages = selectedPhotos + selectedLibraryPhotos
+                                        presentationMode.wrappedValue.dismiss()
+                                }) {
+                                    HStack(spacing: 4) {
+                                            Text("Done")
+                                            .font(.headline)
+                                            Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.blue)
                                     }
-                                    .padding(4)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                .background(Color(.systemBackground))
+                                    .cornerRadius(16)
+                                    }
                                 }
+                                .padding(.trailing, 8)
                             }
                         }
-                        .padding(.horizontal)
-                    }
-                    .frame(height: 70)
-                }
-                
+                        .padding(.top, 44)
+                        .background(
+                    VisualEffectBlur(blurStyle: .systemMaterial)
+                                .edgesIgnoringSafeArea(.top)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .shadow(color: Color(.systemGray4), radius: 8, y: 2)
+                        
+                        // Show selected photos in a horizontal scroll view
+                        if !selectedPhotos.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(Array(selectedPhotos.enumerated()), id: \.offset) { index, photo in
+                                        ZStack(alignment: .topTrailing) {
+                                            Image(uiImage: photo)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 60, height: 60)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            Button(action: {
+                                                removeCapturedPhoto(at: index)
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.white)
+                                                    .background(Color.black.opacity(0.5))
+                                                    .clipShape(Circle())
+                                            }
+                                            .padding(4)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                            .frame(height: 70)
+                        }
+                        
                 // Photo Library
                 VStack(spacing: 6) {
                     Capsule()
@@ -227,13 +227,13 @@ struct CameraView: View {
         let totalSelectedCount = selectedPhotos.count + selectedLibraryPhotos.count
         if totalSelectedCount < maxPhotos {
             let manager = PHImageManager.default()
-            let options = PHImageRequestOptions()
+        let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
-            options.isSynchronous = false
+        options.isSynchronous = false
             
             manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: options) { image, _ in
-                if let image = image {
-                    DispatchQueue.main.async {
+            if let image = image {
+                DispatchQueue.main.async {
                         selectedLibraryPhotos.append(image)
                     }
                 }
@@ -244,8 +244,8 @@ struct CameraView: View {
     private func removeCapturedPhoto(at index: Int) {
         if index < selectedPhotos.count {
             selectedPhotos.remove(at: index)
+            }
         }
-    }
 }
 
 // VisualEffectBlur for SwiftUI
