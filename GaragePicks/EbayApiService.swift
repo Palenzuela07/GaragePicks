@@ -313,11 +313,14 @@ class EbayApiService {
                     totalPrice += priceValue
                     itemCount += 1
                     
+                    // Get the primary image URL from the API response
+                    let imageUrl = item.image?.imageUrl ?? item.thumbnailImages?.first?.imageUrl
+                    
                     // Create simple EbayItem object from EbayItemSummary
                     let ebayItem = EbayItem(
                         title: item.title ?? "Unknown",
                         price: priceValue,
-                        imageUrl: item.imageUrl,
+                        imageUrl: imageUrl,
                         condition: item.condition ?? "Not specified",
                         soldDate: item.soldDate
                     )
@@ -661,20 +664,67 @@ class EbayApiService {
     func searchWithCustomComponents(_ components: URLComponents, itemLimit: Int = 50) async -> Result<EbaySearchResult, Error> {
         print("🔍 Searching with custom components and limit \(itemLimit)")
         
-        // Extract search term from components
-        guard let searchTerm = components.queryItems?.first(where: { $0.name == "q" })?.value else {
-            return .failure(EbayError.invalidSearchTerm)
+        // Check if token is valid, if not refresh it
+        if !isTokenValid() {
+            let tokenResult = await refreshToken()
+            switch tokenResult {
+            case .success:
+                print("✅ Token refreshed successfully")
+            case .failure(let error):
+                print("❌ Failed to refresh token: \(error.localizedDescription)")
+                return .failure(error)
+            }
         }
         
-        // Use web scraping for the first 8 listings
-        if let scrapedResult = await scrapeEbaySoldItemsWeb(term: searchTerm) {
-            print("✅ Successfully scraped \(scrapedResult.items.count) items")
-            return .success(scrapedResult)
+        guard let accessToken = self.authToken else {
+            print("❌ No access token available")
+            return .failure(EbayError.noAccessToken)
         }
         
-        return .failure(EbayError.noItemsFound)
+        guard let url = components.url else {
+            print("❌ Failed to create URL")
+            return .failure(EbayError.invalidURL)
         }
         
+        print("🔗 API URL: \(url.absoluteString)")
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("EBAY_US", forHTTPHeaderField: "X-EBAY-C-MARKETPLACE-ID")
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ Invalid response type")
+                return .failure(EbayError.invalidResponse)
+            }
+            
+            print("🌐 API Response Code: \(httpResponse.statusCode)")
+            
+            if httpResponse.statusCode == 200 {
+                // Parse the response with proper price calculations
+                return parseSearchResponse(data: data)
+            } else if httpResponse.statusCode == 429 {
+                print("⚠️ Rate limit exceeded")
+                if let errorText = String(data: data, encoding: .utf8) {
+                    print("❌ API Error: \(errorText)")
+                }
+                return .failure(EbayError.rateLimitExceeded)
+            } else {
+                if let errorText = String(data: data, encoding: .utf8) {
+                    print("❌ API Error: \(errorText)")
+                }
+                return .failure(EbayError.httpError(httpResponse.statusCode))
+            }
+        } catch {
+            print("❌ Network Error: \(error.localizedDescription)")
+            return .failure(error)
+        }
+    }
+    
     private func scrapeEbaySoldItemsWeb(term: String) async -> EbaySearchResult? {
         let urlString = "https://www.ebay.com/sch/i.html?_nkw=\(term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Complete=1&LH_Sold=1&_sop=10"
         guard let url = URL(string: urlString) else { return nil }
@@ -694,7 +744,40 @@ class EbayApiService {
                 let title = try item.select(".s-item__title").first()?.text() ?? "Unknown"
                 let priceText = try item.select(".s-item__price").first()?.text() ?? ""
                 let price = parseEbayPrice(priceText)
-                let imageUrl = try item.select("img.s-item__image-img").first()?.attr("src")
+                
+                // Try to get the image URL from multiple possible sources
+                var imageUrl: String? = nil
+                
+                // Try the main image first
+                if let imgElement = try item.select("img.s-item__image-img").first() {
+                    imageUrl = try imgElement.attr("src")
+                    if imageUrl == nil {
+                        // Try the data-src attribute if src is not available
+                        imageUrl = try imgElement.attr("data-src")
+                    }
+                }
+                
+                // If still no image URL, try the thumbnail
+                if imageUrl == nil {
+                    if let thumbnailElement = try item.select("img.s-item__image-thumb").first() {
+                        imageUrl = try thumbnailElement.attr("src")
+                        if imageUrl == nil {
+                            imageUrl = try thumbnailElement.attr("data-src")
+                        }
+                    }
+                }
+                
+                // Clean up the image URL if we found one
+                if let url = imageUrl {
+                    // Remove any query parameters that might cause issues
+                    if let cleanUrl = url.components(separatedBy: "?").first {
+                        imageUrl = cleanUrl
+                    }
+                    print("🖼️ Found image URL for '\(title)': \(imageUrl!)")
+                } else {
+                    print("❌ No image URL found for '\(title)'")
+                }
+                
                 let soldDate = try item.select(".s-item__title--tagblock .POSITIVE").first()?.text()
                 let condition = try item.select(".s-item__subtitle").first()?.text() ?? "Not specified"
                 

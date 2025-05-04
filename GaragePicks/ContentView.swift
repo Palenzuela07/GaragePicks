@@ -1295,50 +1295,68 @@ struct WebViewContainer: UIViewRepresentable {
 struct EbayListingCell: View {
     let item: EbayItem
     
+    private func logImageLoading(_ message: String) {
+        print(message)
+    }
+    
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 16) {
             // Image of the item
             ZStack {
-                if let imageUrl = item.imageUrl, let url = URL(string: imageUrl) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .empty:
-                            ProgressView()
-                                .frame(width: 80, height: 80)
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 80, height: 80)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        case .failure:
-                            Image(systemName: "photo")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 40, height: 40)
-                                .foregroundColor(.gray)
-                                .frame(width: 80, height: 80)
-                        @unknown default:
-                            EmptyView()
+                if let imageUrl = item.imageUrl {
+                    let _ = logImageLoading("🖼️ Loading image from URL: \(imageUrl)")
+                    if let url = URL(string: imageUrl) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView()
+                                    .frame(width: 120, height: 120)
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 120, height: 120)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            case .failure:
+                                let _ = logImageLoading("❌ Failed to load image from URL: \(imageUrl)")
+                                Image(systemName: "photo")
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 60, height: 60)
+                                    .foregroundColor(.gray)
+                                    .frame(width: 120, height: 120)
+                            @unknown default:
+                                EmptyView()
+                            }
                         }
+                    } else {
+                        let _ = logImageLoading("❌ Invalid URL: \(imageUrl)")
+                        Image(systemName: "photo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 60, height: 60)
+                            .foregroundColor(.gray)
+                            .frame(width: 120, height: 120)
                     }
                 } else {
+                    let _ = logImageLoading("❌ No image URL available for item: \(item.title)")
                     Image(systemName: "photo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 60, height: 60)
                         .foregroundColor(.gray)
-                        .frame(width: 80, height: 80)
+                        .frame(width: 120, height: 120)
                 }
             }
             .background(Color(.systemGray5))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             
             // Item details
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("$\(String(format: "%.2f", item.price))")
-                        .font(.headline)
+                        .font(.title3)
+                        .fontWeight(.bold)
                         .foregroundColor(.green)
                     
                     Spacer()
@@ -1351,32 +1369,33 @@ struct EbayListingCell: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                     .background(Color(.systemGray6))
-                    .cornerRadius(4)
+                    .cornerRadius(6)
                 }
                 
                 Text(item.title)
-                    .font(.subheadline)
-                    .lineLimit(2)
+                    .font(.body)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
                 
                 HStack {
                     Text(item.condition)
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .font(.subheadline)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                         .background(Color(.systemGray5))
-                        .cornerRadius(4)
+                        .cornerRadius(6)
                         
                     Spacer()
                 }
             }
             .frame(maxWidth: .infinity)
         }
-        .padding()
+        .padding(16)
         .background(Color(.systemGray6))
-        .cornerRadius(10)
+        .cornerRadius(16)
         .padding(.horizontal)
     }
 }
