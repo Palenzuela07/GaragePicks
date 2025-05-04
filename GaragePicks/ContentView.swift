@@ -677,7 +677,7 @@ struct ContentView: View {
         // Convert all selected images to base64 strings
         var base64Images: [String] = []
         for image in selectedImages {
-            if let imageData = image.jpegData(compressionQuality: 0.8) {
+            if let imageData = image.jpegData(compressionQuality: 0.6) {
                 let base64Image = imageData.base64EncodedString()
                 base64Images.append(base64Image)
             }
