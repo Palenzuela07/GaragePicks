@@ -163,7 +163,7 @@ class EbayApiService {
         let tokenResult = await getOAuthToken()
         
         switch tokenResult {
-        case .success:
+        case .success(_):
             return .success(())
         case .failure(let error):
             return .failure(error)

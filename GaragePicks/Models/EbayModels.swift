@@ -160,29 +160,47 @@ struct EbayMarketingPrice: Codable {
 
 // Extension for price statistics
 extension EbayResponseResult {
-    private static var averagePriceKey = "averagePriceKey"
-    private static var lowestPriceKey = "lowestPriceKey"
-    private static var highestPriceKey = "highestPriceKey"
-    private static var itemCountKey = "itemCountKey"
+    private struct AssociatedKeys {
+        static var averagePrice: UInt8 = 0
+        static var lowestPrice: UInt8 = 0
+        static var highestPrice: UInt8 = 0
+        static var itemCount: UInt8 = 0
+    }
     
     var averagePrice: Double {
-        get { return objc_getAssociatedObject(self, &EbayResponseResult.averagePriceKey) as? Double ?? 0.0 }
-        set { objc_setAssociatedObject(self, &EbayResponseResult.averagePriceKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
+        get {
+            return objc_getAssociatedObject(self, &AssociatedKeys.averagePrice) as? Double ?? 0.0
+        }
+        set {
+            objc_setAssociatedObject(self, &AssociatedKeys.averagePrice, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
     }
     
     var lowestPrice: Double {
-        get { return objc_getAssociatedObject(self, &EbayResponseResult.lowestPriceKey) as? Double ?? 0.0 }
-        set { objc_setAssociatedObject(self, &EbayResponseResult.lowestPriceKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
+        get {
+            return objc_getAssociatedObject(self, &AssociatedKeys.lowestPrice) as? Double ?? 0.0
+        }
+        set {
+            objc_setAssociatedObject(self, &AssociatedKeys.lowestPrice, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
     }
     
     var highestPrice: Double {
-        get { return objc_getAssociatedObject(self, &EbayResponseResult.highestPriceKey) as? Double ?? 0.0 }
-        set { objc_setAssociatedObject(self, &EbayResponseResult.highestPriceKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
+        get {
+            return objc_getAssociatedObject(self, &AssociatedKeys.highestPrice) as? Double ?? 0.0
+        }
+        set {
+            objc_setAssociatedObject(self, &AssociatedKeys.highestPrice, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
     }
     
     var itemCount: Int {
-        get { return objc_getAssociatedObject(self, &EbayResponseResult.itemCountKey) as? Int ?? 0 }
-        set { objc_setAssociatedObject(self, &EbayResponseResult.itemCountKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
+        get {
+            return objc_getAssociatedObject(self, &AssociatedKeys.itemCount) as? Int ?? 0
+        }
+        set {
+            objc_setAssociatedObject(self, &AssociatedKeys.itemCount, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
     }
 }
 

@@ -39,14 +39,10 @@ struct GaragePicksApp: App {
                         .onAppear {
                             // Delay initialization slightly to ensure UI is ready
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                do {
-                                    // Initialize app safely
-                                    print("Safe initialization starting...")
-                                    isInitialized = true
-                                    print("Safe initialization complete")
-                                } catch {
-                                    print("ERROR during initialization: \(error.localizedDescription)")
-                                }
+                                // Initialize app safely
+                                print("Safe initialization starting...")
+                                isInitialized = true
+                                print("Safe initialization complete")
                             }
                         }
                 }

@@ -161,24 +161,24 @@ struct ContentView: View {
                 })
             }
         }
-        .onChange(of: selectedImages) { newImages in
-            print("Selected images changed. Count: \(newImages.count)")
+        .onChange(of: selectedImages) { oldValue, newValue in
+            print("Selected images changed. Count: \(newValue.count)")
         }
-        .onChange(of: identifiedItems) { newItems in
+        .onChange(of: identifiedItems) { oldValue, newValue in
             // When items are identified, switch to the analysis tab
-            if !newItems.isEmpty {
+            if !newValue.isEmpty {
                 activeTab = 1
                 // Fetch price data for each identified item if not already fetched
-                for item in newItems {
+                for item in newValue {
                     if itemPriceResults[item] == nil {
                         fetchQuickPriceForIdentifiedItem(item)
                     }
                 }
             }
         }
-        .onChange(of: isPriceLoading) { isLoading in
+        .onChange(of: isPriceLoading) { oldValue, newValue in
             // When pricing results are loaded, switch to pricing tab
-            if !isLoading && priceResults != nil {
+            if !newValue && priceResults != nil {
                 activeTab = 2
             }
         }
