@@ -691,7 +691,7 @@ struct ContentView: View {
         var messages: [[String: Any]] = [
             [
                 "role": "system",
-                "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. You will receive multiple images. Analyze ALL images together and provide a single comprehensive list of all products found across all images. ONLY list the specific product names that could be searched on eBay. DO NOT include any additional descriptions, references, or context. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of ONLY the product names. Do not include phrases like 'visible in cart', 'shown in image', or any other descriptive text - just the product names themselves."
+                "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. You will receive multiple images. Analyze ALL images together and provide a single comprehensive list of all products found across all images. ONLY list the specific product names that could be searched on eBay. For movies, games, or other media, include the media type in the product name (e.g., 'Star Wars DVD movie', 'Mario Kart Nintendo Switch game'). DO NOT include any additional descriptions, references, or context beyond the product name and media type. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of ONLY the product names. Do not include phrases like 'visible in cart', 'shown in image', or any other descriptive text - just the product names themselves."
             ]
         ]
         
@@ -990,14 +990,9 @@ struct ContentView: View {
                     if let firstImage = searchResult.items.first?.imageUrl {
                         itemImageURLs[item] = firstImage
                     }
-                    // Always re-sort when new price data arrives
-                    sortIdentifiedItems()
-                } else {
-                    // Mark as no data to avoid infinite loading
-                    itemPriceResults[item] = EbaySearchResult(averagePrice: 0, lowestPrice: 0, highestPrice: 0, itemCount: 0, items: [])
-                    // Still re-sort to handle the failed item
-                    sortIdentifiedItems()
                 }
+                // Always re-sort when price data arrives or fails
+                sortIdentifiedItems()
             }
         }
     }
@@ -1093,10 +1088,13 @@ struct ContentView: View {
         if isSortedByPrice {
             // Create a temporary array of items with their prices
             var itemsWithPrices: [(item: String, price: Double)] = []
+            var itemsWithoutPrices: [String] = []
             
             for item in identifiedItems {
                 if let priceResult = itemPriceResults[item] {
                     itemsWithPrices.append((item: item, price: priceResult.averagePrice))
+                } else {
+                    itemsWithoutPrices.append(item)
                 }
             }
             
@@ -1106,8 +1104,7 @@ struct ContentView: View {
             // Update the identifiedItems array with the sorted order
             identifiedItems = itemsWithPrices.map { $0.item }
             
-            // Add any items without price data at the end
-            let itemsWithoutPrices = identifiedItems.filter { itemPriceResults[$0] == nil }
+            // Add items without price data at the end
             identifiedItems.append(contentsOf: itemsWithoutPrices)
         } else {
             // Sort alphabetically
