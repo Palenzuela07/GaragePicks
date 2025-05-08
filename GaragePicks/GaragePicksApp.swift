@@ -30,9 +30,9 @@ struct GaragePicksApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                // Wrap ContentView in a safe initialization
+                // Wrap LoginView in a safe initialization
                 if isInitialized {
-                    ContentView()
+                    LoginView()
                 } else {
                     // Show a loading view until initialization is complete
                     ProgressView("Loading...")
