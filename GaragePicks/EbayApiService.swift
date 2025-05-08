@@ -716,15 +716,15 @@ class EbayApiService {
             } else {
                 if let errorText = String(data: data, encoding: .utf8) {
                     print("❌ API Error: \(errorText)")
-                }
+        }
                 return .failure(EbayError.httpError(httpResponse.statusCode))
             }
         } catch {
             print("❌ Network Error: \(error.localizedDescription)")
             return .failure(error)
         }
-    }
-    
+        }
+        
     private func scrapeEbaySoldItemsWeb(term: String) async -> EbaySearchResult? {
         let urlString = "https://www.ebay.com/sch/i.html?_nkw=\(term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&LH_Complete=1&LH_Sold=1&_sop=10"
         guard let url = URL(string: urlString) else { return nil }

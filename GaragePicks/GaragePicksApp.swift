@@ -6,9 +6,32 @@
 //
 
 import SwiftUI
+import FirebaseCore
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        print("🚀 Initializing Firebase...")
+        FirebaseApp.configure()
+        print("✅ Firebase initialized successfully")
+        
+        // Verify Firebase configuration
+        if let app = FirebaseApp.app() {
+            print("📱 Firebase app name: \(app.name)")
+            print("🔑 Firebase options: \(app.options)")
+        } else {
+            print("❌ Firebase app not configured properly")
+        }
+        
+        return true
+    }
+}
 
 @main
 struct GaragePicksApp: App {
+    // register app delegate for Firebase setup
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    
     // Use a lazy property wrapper instead of static initialization
     private let errorManager = ErrorManager()
     
