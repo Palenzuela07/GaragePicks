@@ -43,6 +43,9 @@ struct ContentView: View {
     @State private var isWebViewPresented: Bool = false
     @State private var webViewURL: URL? = nil
     
+    @StateObject private var stripeService = StripeService()
+    @State private var showSubscriptionRequired = false
+    
     private let ebayService = EbayApiService()
     private let maxPhotos = 6
     
@@ -126,9 +129,16 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            // Set up auth state listener
             Auth.auth().addStateDidChangeListener { auth, user in
                 isSignedIn = user != nil
+                if let user = user {
+                    // Here you would get the Stripe customer ID from your backend
+                    // This is just a placeholder - you need to implement this
+                    let customerId = "stripe_customer_id_for_\(user.uid)"
+                    Task {
+                        await stripeService.checkSubscriptionStatus(customerId: customerId)
+                    }
+                }
             }
         }
     }
@@ -206,7 +216,9 @@ struct ContentView: View {
             
             // Profile Menu Overlay
             if showProfileMenu {
-                ProfileMenuView(isShowing: $showProfileMenu, showProfileSettings: $showProfileSettings)
+                ProfileMenuView(isShowing: $showProfileMenu, 
+                              showProfileSettings: $showProfileSettings,
+                              stripeService: stripeService)
             }
         }
         .sheet(isPresented: $isPhotoLibraryPresented) {
@@ -221,6 +233,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showProfileSettings) {
             ProfileSettingsView()
+        }
+        .sheet(isPresented: $showSubscriptionRequired) {
+            SubscriptionRequiredView()
         }
         .onChange(of: selectedImages) { oldValue, newValue in
             print("Selected images changed. Count: \(newValue.count)")
@@ -573,7 +588,6 @@ struct ContentView: View {
                                         .lineLimit(2)
                                         .font(.headline)
                                         .foregroundColor(.primary)
-                                        .multilineTextAlignment(.leading)
                                     
                                     Spacer()
                                     
@@ -753,144 +767,153 @@ struct ContentView: View {
     
     // MARK: - Existing Methods
     
-    func analyzePhoto() {
-        guard !selectedImages.isEmpty else { return }
-        
-        isAnalyzing = true
-        analysisResults = "Analyzing images with ChatGPT..."
-        identifiedItems = []
-        
-        // Convert all selected images to base64 strings
-        var base64Images: [String] = []
-        for image in selectedImages {
-            if let imageData = image.jpegData(compressionQuality: 0.6) {
-                let base64Image = imageData.base64EncodedString()
-                base64Images.append(base64Image)
-            }
+    private func checkSubscriptionForFeature(action: @escaping () -> Void) {
+        if stripeService.isSubscriptionActive {
+            action()
+        } else {
+            showSubscriptionRequired = true
         }
-        
-        // Prepare the ChatGPT API request
-        let apiKey = "YOUR_OPENAI_API_KEY"
-        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
-        
-        // Create the request body with multiple images
-        var messages: [[String: Any]] = [
-            [
-                "role": "system",
-                "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. You will receive multiple images. Analyze ALL images together and provide a single comprehensive list of all products found across all images. ONLY list the specific product names that could be searched on eBay. For movies, games, or other media, include the media type in the product name (e.g., 'Star Wars DVD movie', 'Mario Kart Nintendo Switch game'). DO NOT include any additional descriptions, references, or context beyond the product name and media type. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of ONLY the product names. Do not include phrases like 'visible in cart', 'shown in image', or any other descriptive text - just the product names themselves."
+    }
+    
+    private func analyzePhoto() {
+        checkSubscriptionForFeature {
+            guard !selectedImages.isEmpty else { return }
+            isAnalyzing = true
+            analysisResults = "Analyzing images with ChatGPT..."
+            identifiedItems = []
+            
+            // Convert all selected images to base64 strings
+            var base64Images: [String] = []
+            for image in selectedImages {
+                if let imageData = image.jpegData(compressionQuality: 0.6) {
+                    let base64Image = imageData.base64EncodedString()
+                    base64Images.append(base64Image)
+                }
+            }
+            
+            // Prepare the ChatGPT API request
+            let apiKey = "YOUR_OPENAI_API_KEY"
+            let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+            
+            // Create the request body with multiple images
+            var messages: [[String: Any]] = [
+                [
+                    "role": "system",
+                    "content": "You are an expert at identifying products, especially items found at garage sales, thrift stores, and discount shops. You will receive multiple images. Analyze ALL images together and provide a single comprehensive list of all products found across all images. ONLY list the specific product names that could be searched on eBay. For movies, games, or other media, include the media type in the product name (e.g., 'Star Wars DVD movie', 'Mario Kart Nintendo Switch game'). DO NOT include any additional descriptions, references, or context beyond the product name and media type. Be specific about brands, models, and types. Format your response with an introductory line followed by a numbered list of ONLY the product names. Do not include phrases like 'visible in cart', 'shown in image', or any other descriptive text - just the product names themselves."
+                ]
             ]
-        ]
-        
-        // Create a single user message with all images
-        var content: [[String: Any]] = [
-                    [
-                        "type": "text",
-                "text": "Here are multiple images. Please analyze ALL of them together and provide a single comprehensive list of ONLY the product names found across these images. List ONLY the specific product names as they would appear in an eBay search. Do not include any additional descriptions or context."
+            
+            // Create a single user message with all images
+            var content: [[String: Any]] = [
+                        [
+                            "type": "text",
+                    "text": "Here are multiple images. Please analyze ALL of them together and provide a single comprehensive list of ONLY the product names found across these images. List ONLY the specific product names as they would appear in an eBay search. Do not include any additional descriptions or context."
+                ]
             ]
-        ]
-        
-        // Add all images to the content array
-        for base64Image in base64Images {
-            content.append([
-                        "type": "image_url",
-                        "image_url": [
-                            "url": "data:image/jpeg;base64,\(base64Image)"
-                        ]
+            
+            // Add all images to the content array
+            for base64Image in base64Images {
+                content.append([
+                            "type": "image_url",
+                            "image_url": [
+                                "url": "data:image/jpeg;base64,\(base64Image)"
+                            ]
+                ])
+            }
+            
+            // Add the combined message to the messages array
+            messages.append([
+                "role": "user",
+                "content": content
             ])
-        }
-        
-        // Add the combined message to the messages array
-        messages.append([
-            "role": "user",
-            "content": content
-        ])
-        
-        let requestBody: [String: Any] = [
-            "model": "gpt-4o",
-            "messages": messages,
-            "max_tokens": 1000
-        ]
-        
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: requestBody) else {
-            analysisResults = "Error: Could not serialize request"
-            isAnalyzing = false
-            return
-        }
-        
-        var urlRequest = URLRequest(url: url)
-        urlRequest.httpMethod = "POST"
-        urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.httpBody = jsonData
-        
-        let task = URLSession.shared.dataTask(with: urlRequest) { data, response, error in
-            DispatchQueue.main.async {
+            
+            let requestBody: [String: Any] = [
+                "model": "gpt-4o",
+                "messages": messages,
+                "max_tokens": 1000
+            ]
+            
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: requestBody) else {
+                analysisResults = "Error: Could not serialize request"
                 isAnalyzing = false
-                
-                if let error = error {
-                    analysisResults = "Error: \(error.localizedDescription)"
-                    print("Network error: \(error.localizedDescription)")
-                    return
-                }
-                
-                // Check HTTP response status
-                if let httpResponse = response as? HTTPURLResponse {
-                    print("Response status code: \(httpResponse.statusCode)")
+                return
+            }
+            
+            var urlRequest = URLRequest(url: url)
+            urlRequest.httpMethod = "POST"
+            urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            urlRequest.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            urlRequest.httpBody = jsonData
+            
+            let task = URLSession.shared.dataTask(with: urlRequest) { data, response, error in
+                DispatchQueue.main.async {
+                    isAnalyzing = false
                     
-                    if httpResponse.statusCode != 200 {
-                        if let data = data, let errorMessage = String(data: data, encoding: .utf8) {
-                            print("API Error Response: \(errorMessage)")
-                            analysisResults = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
-                        } else {
-                            analysisResults = "API Error: Status code \(httpResponse.statusCode)"
+                    if let error = error {
+                        analysisResults = "Error: \(error.localizedDescription)"
+                        print("Network error: \(error.localizedDescription)")
+                        return
+                    }
+                    
+                    // Check HTTP response status
+                    if let httpResponse = response as? HTTPURLResponse {
+                        print("Response status code: \(httpResponse.statusCode)")
+                        
+                        if httpResponse.statusCode != 200 {
+                            if let data = data, let errorMessage = String(data: data, encoding: .utf8) {
+                                print("API Error Response: \(errorMessage)")
+                                analysisResults = "API Error (\(httpResponse.statusCode)): \(errorMessage)"
+                            } else {
+                                analysisResults = "API Error: Status code \(httpResponse.statusCode)"
+                            }
+                            return
                         }
-                        return
                     }
-                }
-                
-                guard let data = data else {
-                    analysisResults = "Error: No data received"
-                    return
-                }
-                
-                // Print raw response for debugging
-                if let rawResponse = String(data: data, encoding: .utf8) {
-                    print("Raw API response: \(rawResponse)")
-                }
-                
-                do {
-                    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                        analysisResults = "Error: Could not parse JSON response"
+                    
+                    guard let data = data else {
+                        analysisResults = "Error: No data received"
                         return
                     }
                     
-                    // Extract the response content
-                    guard let choices = json["choices"] as? [[String: Any]],
-                          let firstChoice = choices.first,
-                          let message = firstChoice["message"] as? [String: Any],
-                          let content = message["content"] as? String else {
-                        analysisResults = "Error: Invalid response format"
-                        return
+                    // Print raw response for debugging
+                    if let rawResponse = String(data: data, encoding: .utf8) {
+                        print("Raw API response: \(rawResponse)")
                     }
                     
-                    // Set the full response as analysis results
-                    analysisResults = content
-                    
-                    // Process the response to extract individual items
-                    extractItemsFromResponse(content)
-                    
-                    // Print analysis results to console for debugging
-                    print("===== ANALYSIS RESULTS =====")
-                    print(content)
-                    print("===========================")
-                } catch {
-                    analysisResults = "Error parsing response: \(error.localizedDescription)"
-                    print("Parsing error: \(error.localizedDescription)")
+                    do {
+                        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                            analysisResults = "Error: Could not parse JSON response"
+                            return
+                        }
+                        
+                        // Extract the response content
+                        guard let choices = json["choices"] as? [[String: Any]],
+                              let firstChoice = choices.first,
+                              let message = firstChoice["message"] as? [String: Any],
+                              let content = message["content"] as? String else {
+                            analysisResults = "Error: Invalid response format"
+                            return
+                        }
+                        
+                        // Set the full response as analysis results
+                        analysisResults = content
+                        
+                        // Process the response to extract individual items
+                        extractItemsFromResponse(content)
+                        
+                        // Print analysis results to console for debugging
+                        print("===== ANALYSIS RESULTS =====")
+                        print(content)
+                        print("===========================")
+                    } catch {
+                        analysisResults = "Error parsing response: \(error.localizedDescription)"
+                        print("Parsing error: \(error.localizedDescription)")
+                    }
                 }
             }
+            
+            task.resume()
         }
-        
-        task.resume()
     }
     
     // Helper function to extract individual items from ChatGPT's response

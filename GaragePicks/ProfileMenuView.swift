@@ -21,6 +21,7 @@ struct ProfileMenuView: View {
     @Binding var showProfileSettings: Bool
     @Environment(\.dismiss) private var dismiss
     @StateObject private var authManager = AuthManager()
+    @ObservedObject var stripeService: StripeService
     @State private var showSignOutError = false
     @State private var errorMessage = ""
     @State private var showSubscriptionSafari = false
@@ -63,16 +64,45 @@ struct ProfileMenuView: View {
                     
                     Divider()
                     
+                    // Subscription Status
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: stripeService.subscriptionStatus.icon)
+                                .foregroundColor(stripeService.subscriptionStatus.color)
+                            Text("Subscription Status:")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text(stripeService.subscriptionStatus.description)
+                                .font(.subheadline)
+                                .foregroundColor(stripeService.subscriptionStatus.color)
+                        }
+                        
+                        if let endDate = stripeService.subscriptionEndDate {
+                            Text("Valid until: \(endDate.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    
                     // Menu Items
                     VStack(alignment: .leading, spacing: 0) {
                         MenuButton(title: "Profile & Settings", icon: "person.circle.fill") {
-                            showProfileSettings = true
                             isShowing = false
+                            if let url = URL(string: "https://garagepickapp.com/login.html") {
+                                UIApplication.shared.open(url)
+                            }
                         }
                         
                         MenuButton(title: "Subscription & Billing", icon: "creditcard.fill") {
                             isShowing = false
-                            UIApplication.shared.open(subscriptionURL)
+                            if let url = URL(string: "https://garagepickapp.com/login.html") {
+                                UIApplication.shared.open(url)
+                            }
                         }
                         
                         MenuButton(title: "Sign Out", icon: "rectangle.portrait.and.arrow.right") {
@@ -137,5 +167,5 @@ struct MenuButton: View {
 }
 
 #Preview {
-    ProfileMenuView(isShowing: .constant(true), showProfileSettings: .constant(false))
+    ProfileMenuView(isShowing: .constant(true), showProfileSettings: .constant(false), stripeService: StripeService())
 } 
