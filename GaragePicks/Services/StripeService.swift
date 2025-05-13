@@ -2,7 +2,7 @@ import Foundation
 import FirebaseAuth
 import SwiftUI
 
-enum SubscriptionStatus {
+enum LocalSubscriptionStatus {
     case active
     case canceled
     case expired
@@ -52,7 +52,7 @@ class StripeService: ObservableObject {
     private let stripeSecretKey = StripeConfig.secretKey
     private let baseURL = StripeConfig.apiURL
     
-    @Published var subscriptionStatus: SubscriptionStatus = .none
+    @Published var subscriptionStatus: LocalSubscriptionStatus = .none
     @Published var isLoading = false
     @Published var error: String?
     @Published var subscriptionEndDate: Date?
@@ -65,81 +65,65 @@ class StripeService: ObservableObject {
         isLoading = true
         error = nil
         
-        let endpoint = "\(baseURL)/customers/\(customerId)/subscriptions"
-        guard var urlComponents = URLComponents(string: endpoint) else {
-            handleError("Invalid URL")
+        // Get the current user's email from Firebase
+        guard let email = Auth.auth().currentUser?.email else {
+            handleError("No user email found")
             return
         }
-        
-        // Add query parameters to get all subscriptions (including canceled)
-        urlComponents.queryItems = [
-            URLQueryItem(name: "limit", value: "1"),
-            URLQueryItem(name: "expand[]", value: "data.cancel_at")
-        ]
-        
-        guard let url = urlComponents.url else {
-            handleError("Invalid URL")
-            return
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(stripeSecretKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = try await checkServerSubscriptionStatus(email: email)
             
-            guard let httpResponse = response as? HTTPURLResponse else {
-                handleError("Invalid response")
-                return
-            }
-            
-            switch httpResponse.statusCode {
-            case 200:
-                let decoder = JSONDecoder()
-                let result = try decoder.decode(StripeSubscriptionResponse.self, from: data)
-                
-                DispatchQueue.main.async {
-                    if let subscription = result.data.first {
-                        let endDate = Date(timeIntervalSince1970: TimeInterval(subscription.currentPeriodEnd))
-                        self.subscriptionEndDate = endDate
-                        
-                        // Determine subscription status
-                        if subscription.status == "active" {
-                            if subscription.cancelAtPeriodEnd {
-                                self.subscriptionStatus = .canceled
-                            } else {
-                                self.subscriptionStatus = .active
-                            }
-                        } else if subscription.status == "canceled" {
-                            self.subscriptionStatus = .expired
-                        } else {
-                            self.subscriptionStatus = .none
-                        }
-                    } else {
-                        self.subscriptionStatus = .none
-                        self.subscriptionEndDate = nil
+            DispatchQueue.main.async {
+                if let subscription = status.subscription {
+                    // Parse the end date if available
+                    if let endDateStr = subscription.currentPeriodEnd {
+                        let formatter = ISO8601DateFormatter()
+                        self.subscriptionEndDate = formatter.date(from: endDateStr)
                     }
-                    self.isLoading = false
+                    
+                    // Map server status to local enum
+                    switch subscription.status {
+                    case "active":
+                        self.subscriptionStatus = subscription.cancelAtPeriodEnd ? .canceled : .active
+                    case "canceled":
+                        self.subscriptionStatus = .expired
+                    default:
+                        self.subscriptionStatus = .none
+                    }
+                } else {
+                    self.subscriptionStatus = .none
+                    self.subscriptionEndDate = nil
                 }
                 
-            case 401:
-                handleError("Authentication failed. Please check your Stripe API key.")
+                if let errorMessage = status.error {
+                    self.error = errorMessage
+                }
                 
-            case 404:
-                handleError("Customer not found")
-                
-            case 429:
-                handleError("Too many requests. Please try again later.")
-                
-            default:
-                let errorResponse = try? JSONDecoder().decode(StripeErrorResponse.self, from: data)
-                handleError(errorResponse?.error.message ?? "Failed to check subscription (Error \(httpResponse.statusCode))")
+                self.isLoading = false
             }
         } catch {
             handleError(error.localizedDescription)
         }
+    }
+    
+    private func checkServerSubscriptionStatus(email: String) async throws -> ServerSubscriptionStatus {
+        guard let url = URL(string: "https://garagepickapp.com/api/subscription-status?email=\(email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        
+        let decoder = JSONDecoder()
+        return try decoder.decode(ServerSubscriptionStatus.self, from: data)
     }
     
     private func handleError(_ message: String) {
@@ -148,8 +132,23 @@ class StripeService: ObservableObject {
             self.isLoading = false
             self.subscriptionStatus = .none
             self.subscriptionEndDate = nil
-            print("Stripe Error: \(message)") // For debugging
+            print("Subscription Error: \(message)") // For debugging
         }
+    }
+}
+
+// Server Response Models
+struct ServerSubscriptionStatus: Codable {
+    let hasSubscription: Bool
+    let subscription: Subscription?
+    let message: String?
+    let error: String?
+    
+    struct Subscription: Codable {
+        let id: String
+        let status: String
+        let currentPeriodEnd: String?
+        let cancelAtPeriodEnd: Bool
     }
 }
 
