@@ -9,6 +9,9 @@ struct LoginView: View {
     @State private var errorMessage: String?
     @State private var isLoading = false
     @State private var isFirebaseConnected = false
+    @State private var showResetAlert = false
+    @State private var resetEmail = ""
+    @State private var resetMessage: String?
     
     var body: some View {
         NavigationView {
@@ -23,16 +26,6 @@ struct LoginView: View {
                         .fontWeight(.bold)
                 }
                 .padding(.top, 50)
-                
-                // Firebase Connection Status
-                HStack {
-                    Image(systemName: isFirebaseConnected ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundColor(isFirebaseConnected ? .green : .red)
-                    Text(isFirebaseConnected ? "Connected to Firebase" : "Not connected to Firebase")
-                        .font(.caption)
-                        .foregroundColor(isFirebaseConnected ? .green : .red)
-                }
-                .padding(.bottom, 10)
                 
                 // Login Form
                 VStack(spacing: 15) {
@@ -78,6 +71,15 @@ struct LoginView: View {
                 .disabled(isLoading || email.isEmpty || password.isEmpty)
                 .padding(.horizontal, 30)
                 
+                // Forgot Password Button
+                Button("Forgot Password?") {
+                    if let url = URL(string: "https://garagepickapp.com/reset-password.html") {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .foregroundColor(.blue)
+                .padding(.top, 8)
+                
                 // Sign Up Link
                 VStack(spacing: 5) {
                     Text("Don't have an account?")
@@ -97,6 +99,18 @@ struct LoginView: View {
             .onAppear {
                 checkFirebaseConnection()
             }
+            // Password Reset Alert
+            .alert("Reset Password", isPresented: $showResetAlert, actions: {
+                TextField("Enter your email", text: $resetEmail)
+                Button("Send Reset Link") {
+                    sendPasswordReset()
+                }
+                Button("Cancel", role: .cancel) { }
+            }, message: {
+                if let msg = resetMessage {
+                    Text(msg)
+                }
+            })
         }
     }
     
@@ -120,11 +134,38 @@ struct LoginView: View {
             isLoading = false
             
             if let error = error {
-                errorMessage = error.localizedDescription
+                // Check for specific error codes for wrong password, user not found, invalid email, or invalid credential
+                let nsError = error as NSError
+                let errorDescription = error.localizedDescription.lowercased()
+                if nsError.code == AuthErrorCode.wrongPassword.rawValue ||
+                    nsError.code == AuthErrorCode.userNotFound.rawValue ||
+                    nsError.code == AuthErrorCode.invalidEmail.rawValue ||
+                    nsError.code == AuthErrorCode.invalidCredential.rawValue ||
+                    errorDescription.contains("malformed") ||
+                    errorDescription.contains("invalid") ||
+                    errorDescription.contains("badly formatted") {
+                    errorMessage = "Incorrect password or email"
+                } else {
+                    errorMessage = error.localizedDescription
+                }
                 print("❌ Sign in error: \(error.localizedDescription)")
             } else {
                 print("✅ Sign in successful!")
                 isShowingMainView = true
+            }
+        }
+    }
+    
+    private func sendPasswordReset() {
+        guard !resetEmail.isEmpty else {
+            resetMessage = "Please enter your email."
+            return
+        }
+        Auth.auth().sendPasswordReset(withEmail: resetEmail) { error in
+            if let error = error {
+                resetMessage = error.localizedDescription
+            } else {
+                resetMessage = "A password reset link has been sent to your email."
             }
         }
     }

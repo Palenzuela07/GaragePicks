@@ -410,7 +410,6 @@ struct ContentView: View {
     var analysisTabContent: some View {
         VStack(spacing: 16) {
             if !isAnalyzing && identifiedItems.isEmpty {
-                Spacer()
                 VStack(spacing: 24) {
                     Image(systemName: "magnifyingglass")
                         .imageScale(.large)
@@ -458,181 +457,180 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 40)
+                .padding(.top, 40)
                 Spacer()
             } else {
-                // Show selected photos at the top
-                if !selectedImages.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(selectedImages, id: \.self) { image in
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 100, height: 100)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color(.systemGray4), lineWidth: 1)
-                                    )
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                    .frame(height: 120)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(12)
-                    .padding(.horizontal)
-                }
-                
-                // Show price stats if available
-                if let priceResults = priceResults {
-                    HStack(spacing: 24) {
-                        VStack {
-                            Text("Low")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("$\(String(format: "%.2f", priceResults.lowestPrice))")
-                                .font(.headline)
-                                .foregroundColor(.green)
-                        }
-                        VStack {
-                            Text("Mean")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("$\(String(format: "%.2f", priceResults.averagePrice))")
-                                .font(.headline)
-                                .foregroundColor(.blue)
-                        }
-                        VStack {
-                            Text("High")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("$\(String(format: "%.2f", priceResults.highestPrice))")
-                                .font(.headline)
-                                .foregroundColor(.red)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                }
-                
-                // Existing analysis results
-                if !analysisResults.isEmpty {
-                    VStack(alignment: .leading) {
-                        Text("Analysis Results:")
-                            .font(.headline)
-                        Text(analysisResults)
-                            .padding()
-                            .background(Color(.systemGray6))
-                            .cornerRadius(10)
-                    }
-                    .padding(.horizontal)
-                }
-                
-                // Existing identified items
-                if !identifiedItems.isEmpty {
-                    VStack(alignment: .leading) {
-                        HStack {
-                            Text("Identified Items (tap to search eBay):")
-                                .font(.headline)
-                            Spacer()
-                            Button(action: {
-                                isSortedByPrice.toggle()
-                                sortIdentifiedItems()
-                            }) {
-                                HStack {
-                                    Image(systemName: isSortedByPrice ? "arrow.up.arrow.down" : "arrow.up.arrow.down")
-                                    Text(isSortedByPrice ? "Sort by Name" : "Sort by Price")
-                                }
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                            }
-                        }
-                        .padding(.horizontal)
-                        
-                        ForEach(identifiedItems, id: \.self) { item in
-                            Button(action: {
-                                openEbayWebViewForItem(item)
-                            }) {
-                                HStack {
-                                    // Show image if available
-                                    if let imageUrl = itemImageURLs[item], let url = URL(string: imageUrl) {
-                                        AsyncImage(url: url) { phase in
-                                            switch phase {
-                                            case .empty:
-                                                ProgressView()
-                                                    .frame(width: 36, height: 36)
-                                            case .success(let image):
-                                                image
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 36, height: 36)
-                                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                            case .failure:
-                                                Image(systemName: "photo")
-                                                    .resizable()
-                                                    .scaledToFit()
-                                                    .frame(width: 24, height: 24)
-                                                    .foregroundColor(.gray)
-                                            @unknown default:
-                                                EmptyView()
-                                            }
-                                        }
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Show selected photos at the top
+                        if !selectedImages.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(selectedImages, id: \.self) { image in
+                                        Image(uiImage: image)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 100, height: 100)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .stroke(Color(.systemGray4), lineWidth: 1)
+                                            )
                                     }
-                                    
-                                    Text(item)
-                                        .lineLimit(2)
-                                        .font(.headline)
-                                        .foregroundColor(.primary)
-                                    
-                                    Spacer()
-                                    
-                                    if let stats = itemPriceResults[item] {
-                                        VStack(alignment: .trailing, spacing: 2) {
-                                            Text("Low: $\(String(format: "%.2f", stats.lowestPrice))")
-                                                .font(.caption2)
-                                                .foregroundColor(.green)
-                                            Text("Mean: $\(String(format: "%.2f", stats.averagePrice))")
-                                                .font(.caption2)
-                                                .foregroundColor(.blue)
-                                            Text("High: $\(String(format: "%.2f", stats.highestPrice))")
-                                                .font(.caption2)
-                                                .foregroundColor(.red)
-                                        }
-                                    } else {
-                                        ProgressView()
-                                            .frame(width: 24, height: 24)
-                                    }
-                                    
-                                    Image(systemName: "tag")
-                                        .foregroundColor(.blue)
-                                    Text("Search Completed & Sold")
-                                        .font(.caption)
-                                        .foregroundColor(.blue)
                                 }
-                                .padding(.vertical, 8)
                                 .padding(.horizontal)
-                                .background(getBackgroundColor(for: item))
-                                .cornerRadius(8)
                             }
-                            .buttonStyle(PlainButtonStyle())
+                            .frame(height: 120)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
                             .padding(.horizontal)
-                            .padding(.bottom, 8)
+                        }
+                        
+                        // Show price stats if available
+                        if let priceResults = priceResults {
+                            HStack(spacing: 24) {
+                                VStack {
+                                    Text("Low")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("$\(String(format: "%.2f", priceResults.lowestPrice))")
+                                        .font(.headline)
+                                        .foregroundColor(.green)
+                                }
+                                VStack {
+                                    Text("Mean")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("$\(String(format: "%.2f", priceResults.averagePrice))")
+                                        .font(.headline)
+                                        .foregroundColor(.blue)
+                                }
+                                VStack {
+                                    Text("High")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("$\(String(format: "%.2f", priceResults.highestPrice))")
+                                        .font(.headline)
+                                        .foregroundColor(.red)
+                                }
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
+                            .padding(.horizontal)
+                        }
+                        
+                        // Existing analysis results
+                        if !analysisResults.isEmpty {
+                            VStack(alignment: .leading) {
+                                Text("Analysis Results:")
+                                    .font(.headline)
+                                Text(analysisResults)
+                                    .padding()
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(10)
+                            }
+                            .padding(.horizontal)
+                        }
+                        
+                        // Existing identified items
+                        if !identifiedItems.isEmpty {
+                            VStack(alignment: .leading) {
+                                HStack {
+                                    Text("Identified Items (tap to search eBay):")
+                                        .font(.headline)
+                                    Spacer()
+                                    Button(action: {
+                                        isSortedByPrice.toggle()
+                                        sortIdentifiedItems()
+                                    }) {
+                                        HStack {
+                                            Image(systemName: isSortedByPrice ? "arrow.up.arrow.down" : "arrow.up.arrow.down")
+                                            Text(isSortedByPrice ? "Sort by Name" : "Sort by Price")
+                                        }
+                                        .font(.caption)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.blue)
+                                        .foregroundColor(.white)
+                                        .cornerRadius(8)
+                                    }
+                                }
+                                .padding(.horizontal)
+                                
+                                ForEach(identifiedItems, id: \.self) { item in
+                                    Button(action: {
+                                        openEbayWebViewForItem(item)
+                                    }) {
+                                        HStack {
+                                            if let imageURL = itemImageURLs[item] {
+                                                AsyncImage(url: URL(string: imageURL)) { image in
+                                                    image
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                } placeholder: {
+                                                    Color.gray
+                                                }
+                                                .frame(width: 60, height: 60)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            }
+                                            
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(item)
+                                                    .lineLimit(2)
+                                                    .font(.headline)
+                                                    .foregroundColor(.primary)
+                                                
+                                                Spacer()
+                                                
+                                                if let stats = itemPriceResults[item] {
+                                                    VStack(alignment: .trailing, spacing: 2) {
+                                                        Text("Low: $\(String(format: "%.2f", stats.lowestPrice))")
+                                                            .font(.caption2)
+                                                            .foregroundColor(.green)
+                                                        Text("Mean: $\(String(format: "%.2f", stats.averagePrice))")
+                                                            .font(.caption2)
+                                                            .foregroundColor(.blue)
+                                                        Text("High: $\(String(format: "%.2f", stats.highestPrice))")
+                                                            .font(.caption2)
+                                                            .foregroundColor(.red)
+                                                    }
+                                                } else {
+                                                    ProgressView()
+                                                        .frame(width: 24, height: 24)
+                                                }
+                                            }
+                                            
+                                            Spacer()
+                                            
+                                            Image(systemName: "tag")
+                                                .foregroundColor(.blue)
+                                            Text("Search Completed & Sold")
+                                                .font(.caption)
+                                                .foregroundColor(.blue)
+                                        }
+                                        .padding(.vertical, 8)
+                                        .padding(.horizontal)
+                                        .background(getBackgroundColor(for: item))
+                                        .cornerRadius(8)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .padding(.horizontal)
+                                    .padding(.bottom, 8)
+                                }
+                            }
+                        }
+                        
+                        if isAnalyzing {
+                            ProgressView("Analyzing image...")
+                                .padding()
                         }
                     }
-                }
-                
-                if isAnalyzing {
-                    ProgressView("Analyzing image...")
-                        .padding()
+                    .padding(.vertical)
                 }
             }
         }
-        .padding(.vertical)
     }
     
     struct InfoRow: View {
