@@ -32,9 +32,9 @@ An iOS app that helps resellers figure out what an item is worth before they buy
 4. Each product is searched against the eBay Browse API (US, sold items, sorted by most recent).
 5. Results are filtered by title relevance and recency (last 90 days), then summarized into price statistics.
 
-   <img width="643" height="1280" alt="WhatsApp Image 2025-10-30 at 12 21 03 (1)" src="https://github.com/user-attachments/assets/c03de447-82b2-49af-a324-46140c31c94e" />
-   <img width="623" height="1280" alt="WhatsApp Image 2025-10-30 at 12 21 03 (3)" src="https://github.com/user-attachments/assets/bc27f33f-bcdc-4852-95f0-590833665a50" />
-<img width="627" height="1280" alt="WhatsApp Image 2025-10-30 at 12 21 03 (2)" src="https://github.com/user-attachments/assets/8640aa90-50aa-486b-b6ec-dfd9f8fd6eb6" />
+   <img width="643" height="1280" alt="WhatsApp Image 2025-10-30 at 12 21 03 (1)" width="200" src="https://github.com/user-attachments/assets/c03de447-82b2-49af-a324-46140c31c94e" />
+   <img width="623" height="1280" alt="WhatsApp Image 2025-10-30 at 12 21 03 (3)" width="200" src="https://github.com/user-attachments/assets/bc27f33f-bcdc-4852-95f0-590833665a50" />
+<img width="627" height="1280" alt="WhatsApp Image 2025-10-30 at 12 21 03 (2)" width="200" src="https://github.com/user-attachments/assets/8640aa90-50aa-486b-b6ec-dfd9f8fd6eb6" />
 
 
 
