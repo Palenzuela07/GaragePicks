@@ -4,8 +4,9 @@ An iOS app that helps resellers figure out what an item is worth before they buy
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/c03de447-82b2-49af-a324-46140c31c94e" width="200" alt="Photos screen">
-  <img src="https://github.com/user-attachments/assets/bc27f33f-bcdc-4852-95f0-590833665a50" width="200" alt="Analysis screen">
   <img src="https://github.com/user-attachments/assets/8640aa90-50aa-486b-b6ec-dfd9f8fd6eb6" width="200" alt="Search screen">
+  <img src="https://github.com/user-attachments/assets/bc27f33f-bcdc-4852-95f0-590833665a50" width="200" alt="Analysis screen">
+  
 </p>
 
 ## Features
